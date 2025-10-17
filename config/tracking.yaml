@@ -1,0 +1,65 @@
+# Object Tracking Configuration
+
+tracking:
+  # Tracker Selection
+  tracker: "bytetrack"  # bytetrack, nvdcf, deepsort
+
+  # ByteTrack Settings
+  bytetrack:
+    track_thresh: 0.5  # High-confidence detection threshold
+    track_buffer: 30  # Frames to keep lost tracks
+    match_thresh: 0.8  # IoU threshold for matching
+    min_box_area: 100  # Minimum bbox area (pixels²)
+
+  # NvDCF Settings (NVIDIA DeepStream Tracker)
+  nvdcf:
+    enable_batch_process: true
+    past_frame: 10
+    tracking_surface_type: 1  # 0=GPU, 1=Jetson
+
+  # DeepSORT Settings (backup option)
+  deepsort:
+    max_age: 30
+    min_hits: 3
+    iou_threshold: 0.3
+    max_iou_distance: 0.7
+    embedder: "mobilenet"
+    embedder_gpu: true
+
+  # Track Management
+  management:
+    # Minimum frames to confirm track
+    min_track_length: 3
+
+    # Maximum frames without detection before deletion
+    max_disappeared: 30
+
+    # Re-identification
+    enable_reid: true
+    reid_threshold: 0.6
+
+  # Attribute Inference (run once per track)
+  attribute_inference:
+    # Only run heavy models once per track_id
+    run_once_per_track: true
+
+    # Trigger conditions
+    trigger_on_frame: 5  # Run on 5th frame of track
+    trigger_on_confidence: 0.8  # Or when confidence > 0.8
+
+    # Models to run
+    infer_color: true
+    infer_make_model: true
+    infer_vehicle_type: true  # Already from detection, but can refine
+
+  # Zone Crossing
+  zones:
+    enabled: true
+    lines:
+      - name: "entry"
+        y: 540  # Horizontal line at y=540
+        direction: "down"  # Trigger when crossing downward
+
+      - name: "exit"
+        y: 540
+        direction: "up"

@@ -1,0 +1,67 @@
+# Event Deduplication Configuration
+
+deduplication:
+  enabled: true
+
+  # Deduplication Strategies
+  strategies:
+    # 1. Same track_id (always deduplicate within same track)
+    by_track_id:
+      enabled: true
+      window_seconds: null  # Deduplicate entire track lifetime
+
+    # 2. Same plate text within time window
+    by_plate:
+      enabled: true
+      window_seconds: 10  # Skip same plate within 10 seconds
+      camera_specific: true  # Per-camera dedup window
+
+    # 3. Same plate + same camera + same zone
+    by_zone:
+      enabled: true
+      zone_crossing_only: true  # Only for zone crossing events
+      window_seconds: 300  # 5 minutes
+
+    # 4. Similar bounding boxes (spatial dedup)
+    by_bbox:
+      enabled: false  # Usually not needed with tracking
+      iou_threshold: 0.8
+      window_seconds: 2
+
+  # Event Emission Rules
+  emission:
+    # Emit first detection immediately
+    emit_first: true
+
+    # Emit on track_id confirmation (after min_hits)
+    emit_on_confirmation: true
+
+    # Emit on zone crossing
+    emit_on_zone_cross: true
+
+    # Emit on track end (vehicle leaves frame)
+    emit_on_track_end: false  # Can create duplicates
+
+    # Emit periodic updates for long-dwelling vehicles
+    emit_periodic:
+      enabled: false
+      interval_seconds: 30
+
+  # Best Detection Selection
+  best_detection:
+    # Keep best detection per track (highest confidence)
+    enabled: true
+    criteria: "confidence"  # confidence, sharpness, frontal_angle
+    update_strategy: "replace"  # replace, append
+
+  # Cache Settings
+  cache:
+    backend: "redis"  # redis, memory
+    redis_url: "redis://localhost:6379/0"
+    ttl_seconds: 600  # Cache entries expire after 10 minutes
+    max_entries: 100000
+
+  # Debugging
+  debug:
+    log_duplicates: true  # Log when events are deduplicated
+    log_level: "INFO"

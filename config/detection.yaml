@@ -1,0 +1,41 @@
+# YOLOv11 Detection Configuration
+
+detection:
+  model:
+    name: "yolo11n.pt"  # yolo11n, yolo11s, yolo11m, yolo11l, yolo11x
+    task: "detect"
+
+  # DeepStream / TensorRT Settings
+  deepstream:
+    enabled: true
+    precision: "FP16"  # FP32, FP16, INT8
+    batch_size: 4
+    workspace_size: 2048  # MB
+
+  # Detection Parameters
+  vehicle:
+    enabled: true
+    confidence_threshold: 0.4
+    nms_threshold: 0.5
+    classes: [2, 3, 5, 7]  # car, motorcycle, bus, truck (COCO IDs)
+
+  plate:
+    enabled: true
+    confidence_threshold: 0.6
+    nms_threshold: 0.4
+    # YOLOv11 custom trained model for plate detection
+    custom_model: "models/plate_detector_yolo11n.pt"
+
+  # Preprocessing
+  preprocessing:
+    target_size: [640, 640]  # Model input size
+    normalize: true
+    letterbox: true  # Maintain aspect ratio
+
+  # Performance
+  performance:
+    gpu_id: 0
+    num_workers: 4
+    prefetch_batches: 2
+    use_tensorrt: true
+    cache_models: true

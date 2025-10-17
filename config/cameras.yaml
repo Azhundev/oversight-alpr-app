@@ -1,0 +1,56 @@
+# Camera Configuration
+# Define all cameras with RTSP URLs, locations, and settings
+
+cameras:
+  - id: CAM-001
+    name: "Main Gate"
+    location: "Main Entrance"
+    rtsp_url: "rtsp://admin:password@192.168.1.100:554/stream"
+    site: "site1"
+    enabled: false  # Disabled - no RTSP camera available
+    settings:
+      resolution: "1920x1080"
+      fps: 30
+      codec: "h264"
+
+  - id: CAM-002
+    name: "Parking Lot Exit"
+    location: "Parking Exit"
+    rtsp_url: "rtsp://admin:password@192.168.1.101:554/stream"
+    site: "site1"
+    enabled: false  # Disabled - no RTSP camera available
+    settings:
+      resolution: "1920x1080"
+      fps: 30
+      codec: "h265"
+
+  - id: CAM-003
+    name: "Back Gate"
+    location: "Service Entrance"
+    rtsp_url: "rtsp://admin:password@192.168.1.102:554/stream"
+    site: "site1"
+    enabled: false  # Disabled for maintenance
+    settings:
+      resolution: "1280x720"
+      fps: 15
+      codec: "h264"
+
+# ONVIF Discovery Settings
+onvif:
+  enabled: true
+  discovery_timeout: 5  # seconds
+  auto_add_cameras: false  # Require manual approval
+
+# Video file sources (for testing)
+video_sources:
+  - id: TEST-001
+    name: "Test Video 720p"
+    file_path: "720p.mp4"
+    loop: true
+    enabled: false
+
+  - id: TEST-002
+    name: "Test Video Short"
+    file_path: "a.mp4"
+    loop: false  # Play once only
+    enabled: true  # Use this for testing

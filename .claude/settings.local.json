@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tree:*)",
+      "Bash(chmod:*)",
+      "Bash(python3:*)",
+      "Bash(bash:*)",
+      "Bash(pip3 install loguru redis hiredis cycler)",
+      "Bash(pip3 install:*)",
+      "Read(//proc/13686/fd/**)",
+      "Bash(pgrep:*)",
+      "Bash(pkill -f \"python3 pilot.py\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -1,0 +1,57 @@
+# Plate Validation Configuration
+# North America (USA, Mexico, Canada) only
+
+validation:
+  # Default country (if not specified)
+  default_country: "US"
+  default_region: null  # Auto-detect
+
+  # Normalization rules
+  normalization:
+    uppercase: true
+    remove_spaces: true
+    remove_dashes: true
+    remove_dots: true
+
+    # OCR error corrections
+    ocr_corrections:
+      enabled: true
+      rules:
+        - from: "O"
+          to: "0"
+          context: "numeric"  # Only in numeric context
+        - from: "I"
+          to: "1"
+          context: "numeric"
+        - from: "l"  # lowercase L
+          to: "1"
+          context: "numeric"
+        - from: "S"
+          to: "5"
+          context: "numeric"
+        - from: "Z"
+          to: "2"
+          context: "numeric"
+
+  # Validation thresholds
+  thresholds:
+    min_length: 3
+    max_length: 10
+    min_confidence: 0.7  # Minimum OCR confidence
+
+  # Countries enabled
+  enabled_countries:
+    - US
+    - MX
+    - CA
+
+  # Region detection
+  region_detection:
+    enabled: true
+    method: "regex"  # regex, ml_classifier (future)
+
+  # Hotlist checking
+  hotlist:
+    enabled: false  # Enable for law enforcement integration
+    database: "redis"  # redis, postgres
+    cache_ttl: 3600  # Cache hotlist for 1 hour

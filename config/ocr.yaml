@@ -1,0 +1,52 @@
+# PaddleOCR Configuration
+
+ocr:
+  # PaddleOCR Settings
+  paddle:
+    use_gpu: true
+    gpu_mem: 2000  # MB
+    enable_mkldnn: false  # CPU optimization (disable when using GPU)
+
+    # Detection model (finds text regions)
+    det_model: "en_PP-OCRv4_det"
+    det_db_thresh: 0.3
+    det_db_box_thresh: 0.6
+
+    # Recognition model (reads text)
+    rec_model: "en_PP-OCRv4_rec"
+    rec_batch_num: 6  # Batch multiple plates together
+
+    # Supported languages (80+ available)
+    languages: ['en']  # en, ch, fr, german, korean, japan, etc.
+
+  # Preprocessing
+  preprocessing:
+    # Upscale small plates for better OCR
+    min_plate_height: 32
+    target_height: 64  # Upscale to this height if smaller
+    denoise: true
+    enhance_contrast: true
+    adaptive_threshold: false  # Use PaddleOCR's built-in preprocessing
+
+  # Post-processing
+  postprocessing:
+    # Character whitelist (restrict to valid plate characters)
+    use_whitelist: true
+    whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+    # Confidence filtering
+    min_confidence: 0.7
+    min_text_length: 3
+    max_text_length: 10
+
+  # Performance
+  performance:
+    use_tensorrt: true
+    precision: "FP16"
+    batch_timeout_ms: 50  # Wait up to 50ms to batch plates
+    max_batch_size: 8
+
+  # Fallback to alternative OCR
+  fallback:
+    enabled: false
+    provider: "tesseract"  # tesseract, easyocr

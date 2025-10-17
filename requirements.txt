@@ -1,0 +1,76 @@
+# Core dependencies for Enterprise ALPR System
+
+# Deep Learning & Computer Vision
+torch>=2.1.0
+torchvision>=0.16.0
+ultralytics>=8.1.0  # YOLOv11 support
+opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
+
+# OCR
+paddlepaddle-gpu>=2.6.0  # PaddleOCR GPU support
+paddleocr>=2.7.0
+
+# Object Tracking
+filterpy>=1.4.5  # Kalman filters
+lap>=0.4.0  # Linear assignment problem
+cython-bbox>=0.1.3  # Fast IoU calculation
+
+# ByteTrack (will install from source or pip if available)
+# bytetrack>=0.3.0
+
+# Data Validation & Schemas
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Configuration
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Messaging & Streaming
+kafka-python>=2.0.2
+aiokafka>=0.9.0  # Async Kafka
+paho-mqtt>=1.6.1  # MQTT support
+
+# Database
+psycopg2-binary>=2.9.9  # PostgreSQL
+sqlalchemy>=2.0.23
+alembic>=1.13.0  # Database migrations
+
+# Redis (caching & deduplication)
+redis>=5.0.1
+hiredis>=2.2.3  # Faster Redis
+
+# Object Storage (S3/MinIO)
+boto3>=1.34.0
+minio>=7.2.0
+
+# API Framework
+fastapi>=0.108.0
+uvicorn[standard]>=0.25.0
+python-multipart>=0.0.6
+
+# Monitoring & Logging
+loguru>=0.7.2
+prometheus-client>=0.19.0
+
+# Utilities
+numpy>=1.24.0
+pillow>=10.1.0
+python-dateutil>=2.8.2
+requests>=2.31.0
+
+# ONVIF Camera Discovery
+onvif-zeep>=0.2.12
+wsdiscovery>=2.0.0
+
+# Development Tools
+pytest>=7.4.3
+pytest-asyncio>=0.21.1
+pytest-cov>=4.1.0
+black>=23.12.1
+flake8>=7.0.0
+mypy>=1.7.1
+
+# Optional: TensorRT (for NVIDIA Jetson/GPU optimization)
+# nvidia-tensorrt>=8.6.0  # Install via NVIDIA SDK
