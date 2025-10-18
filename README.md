@@ -209,5 +209,5 @@ Proprietary - Enterprise Use Only
 
 ## Authors
 
-- Project Lead: user
+- Project Lead: Azhundev
 - AI Assistant: Claude Code
