@@ -1,0 +1,134 @@
+# Inference Optimization Configuration
+# Run heavy models once per track, not per frame (huge cost savings)
+
+optimization:
+  # Global Settings
+  enable_track_based_inference: true
+  track_iou_threshold: 0.7  # IoU threshold for track matching
+
+  # OCR Optimization (PaddleOCR)
+  ocr:
+    run_once_per_track: true
+    min_stable_frames: 3  # Wait for track to stabilize before running OCR
+    min_confidence: 0.7  # Minimum OCR confidence to accept result
+    cache_results: true
+    max_cache_size: 1000  # Maximum cached OCR results (memory limit)
+
+    # Trigger conditions
+    trigger_on:
+      - stable_track  # Track has been stable for N frames
+      - high_confidence_detection  # Vehicle detection confidence > threshold
+
+    # Cost savings estimate: 10-30x reduction in OCR calls
+    # Before: 30 FPS × 5 vehicles = 150 OCR calls/sec
+    # After: ~5-15 OCR calls/sec (once per vehicle track)
+
+  # Vehicle Attributes (Color/Make/Model)
+  vehicle_attributes:
+    run_once_per_track: true
+    min_stable_frames: 5  # Wait longer for best quality frame
+    min_confidence: 0.8  # Only run on high-confidence detections
+    cache_results: true
+
+    # What to infer
+    infer_color: true
+    infer_make_model: false  # Disabled by default (very heavy)
+    infer_vehicle_type_refinement: false  # Already from detection
+
+    # Trigger conditions
+    trigger_on_best_frame: true  # Run on highest confidence frame
+    trigger_frame_number: 5  # Or run on Nth frame of track
+
+    # Cost savings estimate: 20-50x reduction if make/model enabled
+    # Make/model inference can be 100-200ms per vehicle
+    # Running once vs every frame = massive savings
+
+  # Re-identification (Vehicle Re-ID)
+  reid:
+    run_once_per_track: true
+    min_stable_frames: 3
+    cache_embeddings: true
+    embedding_cache_ttl: 300  # Keep embeddings for 5 minutes
+
+    # Cost savings: 15-25x reduction
+    # ReID feature extraction is expensive (50-100ms)
+
+  # Resolution Optimization
+  resolution:
+    # Keep ingest at full resolution for decode
+    ingest_resolution: [1920, 1080]  # 1080p
+
+    # Resize for inference (960-1280px short side)
+    inference_short_side: 960  # Resize shorter dimension to this
+    maintain_aspect_ratio: true
+
+    # Specific model resolutions
+    vehicle_detection_size: [960, 540]  # Scaled from 1080p
+    plate_detection_size: [960, 540]
+    ocr_max_size: [1280, 720]  # OCR can use slightly higher res
+
+    # Cost savings: 2-4x speedup from smaller inference size
+    # GPU memory savings: ~3x less memory usage
+
+  # Image Crop Optimization (for storage/upload)
+  crops:
+    # Vehicle crops
+    vehicle_crop_max_dimension: 640  # Long side
+    vehicle_crop_quality: 85  # JPEG quality (80-85 recommended)
+
+    # Plate crops
+    plate_crop_max_dimension: 640
+    plate_crop_quality: 85
+
+    # Storage optimization
+    resize_before_encode: true  # Resize before JPEG encode
+    use_fast_resize: true  # Use faster bilinear vs bicubic
+
+    # Cost savings: 5-10x smaller file sizes
+    # I/O and network transfer much faster
+
+  # Batch Processing
+  batching:
+    enable_batch_inference: false  # Disabled for real-time (increases latency)
+    max_batch_size: 4
+    batch_timeout_ms: 50  # Wait up to 50ms to collect batch
+
+    # Only batch OCR (lightweight enough to benefit)
+    batch_ocr: true
+    batch_vehicle_detection: false  # Adds latency
+    batch_attributes: false
+
+  # Frame Skipping (Additional optimization)
+  frame_skipping:
+    enable: false  # Disabled by default (tracking requires every frame)
+    process_every_n_frames: 2  # Process every 2nd frame
+
+    # Only enable if:
+    # - Very high FPS (60+)
+    # - Static camera scenes
+    # - Not using tracking
+
+  # Memory Management
+  memory:
+    # Clear old track caches periodically
+    cleanup_interval_frames: 300  # Every 300 frames (~10 sec at 30 FPS)
+    max_inactive_track_age: 30  # Remove tracks inactive for 30 frames
+
+    # Keep historical data for analytics
+    keep_ocr_cache: true  # Don't delete OCR results (for reports)
+    keep_attribute_cache: true
+    max_historical_tracks: 10000  # Limit memory usage
+
+# Performance Expectations
+#
+# Without optimization (run every frame):
+# - OCR: 150 calls/sec @ 30 FPS, 5 vehicles = 15,000-30,000ms/sec GPU time
+# - Attributes: 150 calls/sec = massive GPU overload
+# - Result: ~5-10 FPS max
+#
+# With optimization (run once per track):
+# - OCR: ~5-15 calls/sec = 500-1500ms/sec GPU time
+# - Attributes: ~1-3 calls/sec = negligible
+# - Result: ~25-30 FPS easily achievable
+#
+# Total cost savings: 90-95% reduction in heavy model inference

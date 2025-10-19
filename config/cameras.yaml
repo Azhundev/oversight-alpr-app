@@ -52,5 +52,5 @@ video_sources:
   - id: TEST-002
     name: "Test Video Short"
     file_path: "a.mp4"
-    loop: false  # Play once only
+    loop: true  # Enable looping
     enabled: true  # Use this for testing

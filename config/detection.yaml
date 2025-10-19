@@ -15,13 +15,13 @@ detection:
   # Detection Parameters
   vehicle:
     enabled: true
-    confidence_threshold: 0.4
+    confidence_threshold: 0.6  # Increased from 0.4 to reduce false positives
     nms_threshold: 0.5
     classes: [2, 3, 5, 7]  # car, motorcycle, bus, truck (COCO IDs)
 
   plate:
     enabled: true
-    confidence_threshold: 0.6
+    confidence_threshold: 0.7  # Increased from 0.6 to reduce false positives
     nms_threshold: 0.4
     # YOLOv11 custom trained model for plate detection
     custom_model: "models/plate_detector_yolo11n.pt"

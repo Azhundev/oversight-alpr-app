@@ -28,6 +28,7 @@ class YOLOv11Detector:
         device: str = "cuda:0",
         use_tensorrt: bool = True,
         fp16: bool = True,
+        int8: bool = False,
         batch_size: int = 1,
     ):
         """
@@ -39,11 +40,13 @@ class YOLOv11Detector:
             device: Device to run on (cuda:0 for Jetson)
             use_tensorrt: Enable TensorRT optimization
             fp16: Use FP16 precision for faster inference
+            int8: Use INT8 precision for even faster inference (requires calibration)
             batch_size: Batch size for inference
         """
         self.device = device
         self.use_tensorrt = use_tensorrt
         self.fp16 = fp16
+        self.int8 = int8
         self.batch_size = batch_size
 
         # Vehicle classes from COCO dataset
@@ -75,15 +78,27 @@ class YOLOv11Detector:
         # Export to TensorRT if enabled (Jetson optimization)
         if self.use_tensorrt and not model_path.endswith('.engine'):
             try:
-                logger.info("Exporting model to TensorRT...")
-                # Export with FP16 precision for Jetson
-                engine_path = model.export(
-                    format='engine',
-                    half=self.fp16,
-                    device=self.device,
-                    batch=self.batch_size,
-                    workspace=2,  # 2GB workspace
-                )
+                if self.int8:
+                    logger.info("Exporting model to TensorRT with INT8 precision...")
+                    # Export with INT8 precision for maximum speed
+                    engine_path = model.export(
+                        format='engine',
+                        int8=True,
+                        device=self.device,
+                        batch=self.batch_size,
+                        workspace=2,  # 2GB workspace
+                        data='coco.yaml',  # Calibration dataset
+                    )
+                else:
+                    logger.info("Exporting model to TensorRT with FP16 precision...")
+                    # Export with FP16 precision for Jetson
+                    engine_path = model.export(
+                        format='engine',
+                        half=self.fp16,
+                        device=self.device,
+                        batch=self.batch_size,
+                        workspace=2,  # 2GB workspace
+                    )
                 logger.success(f"TensorRT engine created: {engine_path}")
                 model = YOLO(engine_path)
             except Exception as e:
@@ -305,11 +320,15 @@ class YOLOv11Detector:
 
             # Filter by aspect ratio (plates are typically 2:1 to 5.5:1)
             aspect_ratio = w / float(h) if h > 0 else 0
+            area = w * h
+            roi_area = roi.shape[0] * roi.shape[1]
 
-            # Filter by size and aspect ratio
-            if (2.0 <= aspect_ratio <= 5.5 and
-                w >= 60 and h >= 20 and
-                w <= roi.shape[1] * 0.9 and h <= roi.shape[0] * 0.5):
+            # Filter by size and aspect ratio (stricter criteria)
+            if (2.5 <= aspect_ratio <= 5.0 and  # Narrower aspect ratio range
+                w >= 80 and h >= 25 and  # Larger minimum size
+                area >= 2000 and  # Minimum area requirement
+                area <= roi_area * 0.15 and  # Max 15% of vehicle area
+                w <= roi.shape[1] * 0.8 and h <= roi.shape[0] * 0.4):
 
                 bbox = BoundingBox(
                     x1=offset_x + x,
