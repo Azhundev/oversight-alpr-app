@@ -5,9 +5,12 @@ Tests complete pipeline: Camera → Detection → Visualization
 Optimized for NVIDIA Jetson Orin NX
 """
 
+print("=== PILOT.PY STARTING ===", flush=True)
+
 import cv2
 import sys
 import time
+import numpy as np
 from pathlib import Path
 from loguru import logger
 
@@ -17,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from services.camera.camera_ingestion import CameraManager
 from services.detector.detector_service import YOLOv11Detector
 from services.ocr.ocr_service import PaddleOCRService
+from services.tracker.bytetrack_service import ByteTrackService, Detection
+from shared.utils.tracking_utils import bbox_to_numpy, get_track_color, draw_track_id
 
 
 class ALPRPilot:
@@ -26,25 +31,36 @@ class ALPRPilot:
         self,
         camera_config: str = "config/cameras.yaml",
         detector_model: str = "yolo11n.pt",
+        plate_model: str = None,
         use_tensorrt: bool = True,
         display: bool = True,
         save_output: bool = False,
         enable_ocr: bool = True,
+        enable_tracking: bool = True,
+        frame_skip: int = 2,
+        adaptive_sampling: bool = True,
     ):
         """
         Initialize ALPR pilot
 
         Args:
             camera_config: Path to camera configuration
-            detector_model: YOLOv11 model path
+            detector_model: YOLOv11 vehicle model path
+            plate_model: YOLOv11 plate detection model path (optional)
             use_tensorrt: Enable TensorRT optimization
             display: Show visualization window
             save_output: Save annotated frames to disk
             enable_ocr: Enable OCR for license plate recognition
+            enable_tracking: Enable ByteTrack multi-object tracking
+            frame_skip: Process every Nth frame (0=all frames, 1=every other, 2=every 3rd, etc)
+            adaptive_sampling: Dynamically adjust frame skip based on vehicle presence
         """
         self.display = display
         self.save_output = save_output
         self.enable_ocr = enable_ocr
+        self.enable_tracking = enable_tracking
+        self.frame_skip = frame_skip
+        self.adaptive_sampling = adaptive_sampling
         self.output_dir = Path("output")
 
         if self.save_output:
@@ -58,7 +74,8 @@ class ALPRPilot:
         logger.info("Initializing YOLOv11 detector...")
         self.detector = YOLOv11Detector(
             vehicle_model_path=detector_model,
-            use_tensorrt=False,  # Disabled to avoid 8-min TensorRT build
+            plate_model_path=plate_model,
+            use_tensorrt=use_tensorrt,
             fp16=True,
             int8=False,
             batch_size=1,
@@ -80,6 +97,12 @@ class ALPRPilot:
             logger.info("Warming up OCR...")
             self.ocr.warmup(iterations=5)
 
+        # Initialize Tracker
+        self.tracker = None
+        if self.enable_tracking:
+            logger.info("Initializing ByteTrack tracker...")
+            self.tracker = ByteTrackService(config_path="config/tracking.yaml")
+
         # Stats
         self.frame_count = 0
         self.detection_count = 0
@@ -92,80 +115,38 @@ class ALPRPilot:
         self.track_ocr_cache = {}  # track_id -> PlateDetection
         self.track_attributes_cache = {}  # track_id -> {color, make, model}
         self.track_frame_count = {}  # track_id -> frame count
-        self.track_last_bbox = {}  # track_id -> last bbox (for stability check)
-        self.track_best_confidence = {}  # track_id -> highest detection confidence
-        self.next_track_id = 0  # Simple track ID counter
 
         # OCR throttling parameters
         self.ocr_min_track_frames = 3  # Wait for track to stabilize
-        self.ocr_bbox_iou_threshold = 0.7  # IoU threshold for same track
-        self.ocr_cooldown_frames = 30  # Don't re-OCR same track for N frames
 
         # Attribute inference parameters
         self.attr_min_confidence = 0.8  # Run attributes on high-confidence frames
         self.attr_min_track_frames = 5  # Wait for even more stability for attributes
 
+        # Adaptive frame sampling parameters
+        self.frames_since_last_detection = 0
+        self.max_skip_no_vehicles = 9  # Skip more frames when no vehicles (process every 10th)
+        self.min_skip_with_vehicles = max(0, frame_skip - 1)  # Reduce skip when vehicles present (but still skip some)
+        self.adaptive_skip_current = self.frame_skip  # Current adaptive skip value
+
         logger.success("ALPR Pilot initialized successfully")
 
-    def calculate_iou(self, bbox1, bbox2):
-        """Calculate Intersection over Union between two bounding boxes"""
-        # Extract coordinates
-        x1_1, y1_1, x2_1, y2_1 = bbox1.x1, bbox1.y1, bbox1.x2, bbox1.y2
-        x1_2, y1_2, x2_2, y2_2 = bbox2.x1, bbox2.y1, bbox2.x2, bbox2.y2
-
-        # Calculate intersection area
-        x1_i = max(x1_1, x1_2)
-        y1_i = max(y1_1, y1_2)
-        x2_i = min(x2_1, x2_2)
-        y2_i = min(y2_1, y2_2)
+    def _compute_iou_np(self, bbox1: np.ndarray, bbox2: np.ndarray) -> float:
+        """Compute IoU between two numpy bboxes [x1, y1, x2, y2]"""
+        x1_i = max(bbox1[0], bbox2[0])
+        y1_i = max(bbox1[1], bbox2[1])
+        x2_i = min(bbox1[2], bbox2[2])
+        y2_i = min(bbox1[3], bbox2[3])
 
         if x2_i < x1_i or y2_i < y1_i:
             return 0.0
 
         intersection = (x2_i - x1_i) * (y2_i - y1_i)
-
-        # Calculate union area
-        area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
-        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+        area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
+        area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
         union = area1 + area2 - intersection
 
-        if union == 0:
-            return 0.0
-
-        return intersection / union
-
-    def match_vehicle_to_track(self, vehicle_bbox):
-        """
-        Match a vehicle detection to an existing track or create new track
-
-        Args:
-            vehicle_bbox: BoundingBox of detected vehicle
-
-        Returns:
-            track_id: Matched or newly created track ID
-        """
-        best_iou = 0
-        best_track_id = None
-
-        # Try to match with existing tracks
-        for track_id, last_bbox in self.track_last_bbox.items():
-            iou = self.calculate_iou(vehicle_bbox, last_bbox)
-            if iou > best_iou and iou >= self.ocr_bbox_iou_threshold:
-                best_iou = iou
-                best_track_id = track_id
-
-        # Create new track if no match found
-        if best_track_id is None:
-            best_track_id = self.next_track_id
-            self.next_track_id += 1
-            self.track_frame_count[best_track_id] = 0
-            logger.debug(f"Created new track: {best_track_id}")
-
-        # Update track
-        self.track_last_bbox[best_track_id] = vehicle_bbox
-        self.track_frame_count[best_track_id] += 1
-
-        return best_track_id
+        return intersection / union if union > 0 else 0.0
 
     def should_run_ocr(self, track_id):
         """
@@ -232,26 +213,6 @@ class ALPRPilot:
         self.track_attributes_cache[track_id] = attributes
         logger.debug(f"Cached attributes for track {track_id}: {attributes}")
 
-    def cleanup_old_tracks(self, active_track_ids):
-        """
-        Remove tracks that are no longer active
-
-        Args:
-            active_track_ids: Set of currently active track IDs
-        """
-        # Remove stale tracks
-        stale_tracks = set(self.track_last_bbox.keys()) - active_track_ids
-
-        for track_id in stale_tracks:
-            self.track_last_bbox.pop(track_id, None)
-            self.track_frame_count.pop(track_id, None)
-            self.track_best_confidence.pop(track_id, None)
-            # Keep OCR and attribute caches for historical data
-            # (optional: could also remove to save memory)
-
-        if stale_tracks:
-            logger.debug(f"Cleaned up {len(stale_tracks)} stale tracks")
-
     def process_frame(self, frame, camera_id: str):
         """
         Process single frame through detection pipeline
@@ -263,6 +224,14 @@ class ALPRPilot:
         Returns:
             Annotated frame
         """
+        # Adaptive or fixed frame skipping for performance
+        current_skip = self.adaptive_skip_current if self.adaptive_sampling else self.frame_skip
+
+        if current_skip > 0 and self.frame_count % (current_skip + 1) != 0:
+            # Skip processing, just increment counter and return original frame
+            self.frame_count += 1
+            return frame
+
         start_time = time.time()
 
         # Detect vehicles
@@ -272,26 +241,70 @@ class ALPRPilot:
             nms_threshold=0.5
         )
 
-        # Match vehicles to tracks (simple IoU-based tracking)
+        # Adaptive frame sampling: adjust skip rate based on vehicle presence
+        if self.adaptive_sampling:
+            if len(vehicles) > 0:
+                # Vehicles detected - process more frequently
+                self.frames_since_last_detection = 0
+                self.adaptive_skip_current = self.min_skip_with_vehicles
+            else:
+                # No vehicles - increase skip rate gradually
+                self.frames_since_last_detection += 1
+                if self.frames_since_last_detection > 30:  # After 30 frames (~1 sec) without vehicles
+                    self.adaptive_skip_current = self.max_skip_no_vehicles
+                else:
+                    # Gradual transition to max skip
+                    self.adaptive_skip_current = self.frame_skip
+
+        # Update tracker with detections
         vehicle_tracks = {}  # vehicle_idx -> track_id
-        active_track_ids = set()
 
-        for idx, vehicle in enumerate(vehicles):
-            track_id = self.match_vehicle_to_track(vehicle.bbox)
-            vehicle_tracks[idx] = track_id
-            active_track_ids.add(track_id)
+        if self.enable_tracking and self.tracker:
+            # Convert detections to tracker format
+            detections = []
+            for vehicle in vehicles:
+                det = Detection(
+                    bbox=bbox_to_numpy(vehicle.bbox),
+                    confidence=vehicle.confidence,
+                    class_id=0  # All vehicles for now
+                )
+                detections.append(det)
 
-            # Track best confidence for this vehicle
-            current_best = self.track_best_confidence.get(track_id, 0.0)
-            if vehicle.confidence > current_best:
-                self.track_best_confidence[track_id] = vehicle.confidence
+            # Update tracker
+            active_tracks = self.tracker.update(detections)
 
-            # Cache vehicle attributes on first high-confidence frame
-            if self.should_cache_attributes(track_id, vehicle.confidence):
-                self.cache_vehicle_attributes(track_id, vehicle)
+            # Map vehicle detections to track IDs
+            for idx, vehicle in enumerate(vehicles):
+                # Find matching track by IoU
+                best_iou = 0
+                best_track = None
+                vehicle_bbox_np = bbox_to_numpy(vehicle.bbox)
 
-        # Cleanup old tracks
-        self.cleanup_old_tracks(active_track_ids)
+                for track in active_tracks:
+                    # Simple IoU matching between detection and track
+                    track_bbox = track.tlbr
+                    iou = self._compute_iou_np(vehicle_bbox_np, track_bbox)
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_track = track
+
+                if best_track:
+                    track_id = best_track.track_id
+                    vehicle_tracks[idx] = track_id
+
+                    # Update track frame count
+                    if track_id not in self.track_frame_count:
+                        self.track_frame_count[track_id] = 0
+                    self.track_frame_count[track_id] += 1
+
+                    # Cache vehicle attributes on first high-confidence frame
+                    if self.should_cache_attributes(track_id, vehicle.confidence):
+                        self.cache_vehicle_attributes(track_id, vehicle)
+        else:
+            # No tracking - assign sequential IDs
+            for idx, vehicle in enumerate(vehicles):
+                vehicle_tracks[idx] = idx
+
 
         # Detect plates (within vehicle bboxes)
         vehicle_bboxes = [v.bbox for v in vehicles] if vehicles else None
@@ -379,7 +392,7 @@ class ALPRPilot:
 
         # Log OCR throttling stats
         if ocr_runs_this_frame > 0:
-            logger.debug(f"OCR runs this frame: {ocr_runs_this_frame} (active tracks: {len(active_track_ids)})")
+            logger.debug(f"OCR runs this frame: {ocr_runs_this_frame} (active tracks: {len(vehicle_tracks)})")
 
         # Visualize
         annotated_frame = self._visualize(
@@ -483,13 +496,20 @@ class ALPRPilot:
         line_height = 25
 
         ocr_status = "ON" if self.enable_ocr else "OFF"
-        active_tracks = len(self.track_last_bbox)
+        tracking_status = "ON" if self.enable_tracking else "OFF"
+        active_tracks = len(self.track_frame_count) if self.enable_tracking else 0
         cached_ocr = len(self.track_ocr_cache)
 
+        # Frame sampling info
+        if self.adaptive_sampling:
+            sampling_info = f"Adaptive: skip={self.adaptive_skip_current}"
+        else:
+            sampling_info = f"Fixed: skip={self.frame_skip}"
+
         texts = [
-            f"Camera: {camera_id} | OCR: {ocr_status} | Tracks: {active_tracks} (Cached: {cached_ocr})",
+            f"Camera: {camera_id} | OCR: {ocr_status} | Tracking: {tracking_status} | {sampling_info}",
             f"FPS: {self.fps_smoothed:.1f} | Processing: {processing_time:.1f}ms",
-            f"Detections: {num_detections} vehicles | Total Frames: {self.frame_count}",
+            f"Detections: {num_detections} vehicles | Active Tracks: {active_tracks} | Cached OCR: {cached_ocr}",
             f"Total Vehicles: {self.detection_count} | Plates Read: {self.plate_count} | Uptime: {time.time() - self.start_time:.0f}s"
         ]
 
@@ -606,7 +626,12 @@ def main():
     parser.add_argument(
         "--model",
         default="yolo11n.pt",
-        help="YOLOv11 model path (default: yolo11n.pt)"
+        help="YOLOv11 vehicle model path (default: yolo11n.pt)"
+    )
+    parser.add_argument(
+        "--plate-model",
+        default=None,
+        help="YOLOv11 plate detection model path (optional, uses contour-based detection if not provided)"
     )
     parser.add_argument(
         "--no-tensorrt",
@@ -628,6 +653,22 @@ def main():
         action="store_true",
         help="Disable OCR for license plate recognition"
     )
+    parser.add_argument(
+        "--no-tracking",
+        action="store_true",
+        help="Disable ByteTrack multi-object tracking"
+    )
+    parser.add_argument(
+        "--skip-frames",
+        type=int,
+        default=2,
+        help="Process every Nth frame (0=all, 1=every other, 2=every 3rd, etc.) - default: 2 for parking gates"
+    )
+    parser.add_argument(
+        "--no-adaptive-sampling",
+        action="store_true",
+        help="Disable adaptive frame sampling (use fixed skip rate)"
+    )
 
     args = parser.parse_args()
 
@@ -635,10 +676,14 @@ def main():
     pilot = ALPRPilot(
         camera_config=args.config,
         detector_model=args.model,
+        plate_model=args.plate_model,
         use_tensorrt=not args.no_tensorrt,
         display=not args.no_display,
         save_output=args.save_output,
         enable_ocr=not args.no_ocr,
+        enable_tracking=not args.no_tracking,
+        frame_skip=args.skip_frames,
+        adaptive_sampling=not args.no_adaptive_sampling,
     )
 
     # Run

@@ -43,7 +43,7 @@ env/
 # PyCharm
 .idea/
 
-# Model Files
+# Model Files (weights, engines, exports)
 *.pt
 *.onnx
 *.engine
@@ -51,20 +51,38 @@ env/
 *.weights
 *.pb
 *.pth
+*.bin
+*.caffemodel
+*.h5
+models/*.pt
+models/*.engine
+models/*.onnx
+models/**/*.engine
+models/**/*.onnx
 
-# Video Files
+# Video Files (test videos, recordings)
 *.mp4
 *.avi
 *.mov
 *.mkv
 *.flv
 *.wmv
+*.webm
+*.m4v
 
-# Image Files (if you want to ignore test images)
-# *.jpg
-# *.jpeg
-# *.png
-# *.gif
+# Image Files (test images, outputs)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.webp
+# Exception: Keep documentation images
+!docs/**/*.jpg
+!docs/**/*.jpeg
+!docs/**/*.png
+!docs/**/*.gif
 
 # Logs
 *.log
@@ -94,6 +112,18 @@ output/
 results/
 detections/
 plates/
+runs/
+exports/
+
+# Datasets (large calibration/training data)
+datasets/
+training_data/
+data/coco/
+data/calibration/
+*.zip
+*.tar
+*.tar.gz
+*.tgz
 
 # System files
 .DS_Store
@@ -113,6 +143,15 @@ coverage.xml
 # Documentation builds
 docs/_build/
 
+# Internal implementation guides (moved to docs/)
+INT8_PRECISION_GUIDE.md
+
+# YOLO export artifacts
+yolo*.onnx
+yolo*.engine
+last.pt
+best.pt
+
 # Secrets and credentials
 *.key
 *.pem
@@ -130,5 +169,14 @@ config.local.yml
 .claude/settings.local.json
 
 # Test scripts and outputs
-tests/
 test_*.py
+*_test.py
+benchmark_*.py
+
+# Installation and verification scripts (already on GitHub)
+install_jetson.sh
+verify_installation.py
+
+# Ultralytics cache and runs
+.ultralytics/
+wandb/
