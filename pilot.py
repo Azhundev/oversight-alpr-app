@@ -13,6 +13,8 @@ import time
 import numpy as np
 from pathlib import Path
 from loguru import logger
+import csv
+from datetime import datetime
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -62,9 +64,18 @@ class ALPRPilot:
         self.frame_skip = frame_skip
         self.adaptive_sampling = adaptive_sampling
         self.output_dir = Path("output")
+        self.output_dir.mkdir(exist_ok=True)  # Always create output dir for CSV
 
-        if self.save_output:
-            self.output_dir.mkdir(exist_ok=True)
+        # Create crops directory for saving plate images
+        self.crops_dir = self.output_dir / "crops"
+        self.crops_dir.mkdir(exist_ok=True)
+
+        # Initialize plate reads CSV file
+        self.plate_csv_path = self.output_dir / "plate_reads.csv"
+        self._init_plate_csv()
+
+        # Counter for saved crops
+        self.crop_counter = 0
 
         # Initialize camera manager
         logger.info("Initializing camera manager...")
@@ -76,8 +87,8 @@ class ALPRPilot:
             vehicle_model_path=detector_model,
             plate_model_path=plate_model,
             use_tensorrt=use_tensorrt,
-            fp16=True,
-            int8=False,
+            fp16=True,   # FP16 provides 2-3x speedup on Jetson and is stable
+            int8=False,  # INT8 has TensorRT bugs with this model/Jetson combo
             batch_size=1,
         )
 
@@ -105,7 +116,7 @@ class ALPRPilot:
 
         # Stats
         self.frame_count = 0
-        self.detection_count = 0
+        self.unique_vehicles = set()  # Track unique vehicle IDs
         self.plate_count = 0
         self.start_time = time.time()
         self.fps_smoothed = 0.0
@@ -129,7 +140,62 @@ class ALPRPilot:
         self.min_skip_with_vehicles = max(0, frame_skip - 1)  # Reduce skip when vehicles present (but still skip some)
         self.adaptive_skip_current = self.frame_skip  # Current adaptive skip value
 
+        # Cached overlay data (for skipped frames)
+        self.last_processing_time = 0.0
+        self.last_num_detections = 0
+
         logger.success("ALPR Pilot initialized successfully")
+
+    def _init_plate_csv(self):
+        """Initialize CSV file for plate reads"""
+        # Create CSV with headers if it doesn't exist
+        if not self.plate_csv_path.exists():
+            with open(self.plate_csv_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['Timestamp', 'Camera_ID', 'Track_ID', 'Plate_Text', 'Confidence', 'Frame_Number'])
+            logger.info(f"Created plate reads CSV: {self.plate_csv_path}")
+        else:
+            logger.info(f"Appending to existing CSV: {self.plate_csv_path}")
+
+    def _save_plate_read(self, camera_id: str, track_id: int, plate_text: str, confidence: float):
+        """Save a plate read to CSV file"""
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            with open(self.plate_csv_path, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([timestamp, camera_id, track_id, plate_text, f"{confidence:.3f}", self.frame_count])
+        except Exception as e:
+            logger.error(f"Failed to save plate read: {e}")
+
+    def _save_plate_crop(self, frame, plate_bbox, track_id: int, camera_id: str):
+        """Save cropped plate image to output/crops directory"""
+        try:
+            # Extract plate region from frame
+            x1, y1, x2, y2 = map(int, [plate_bbox.x1, plate_bbox.y1, plate_bbox.x2, plate_bbox.y2])
+
+            # Ensure coordinates are within frame bounds
+            h, w = frame.shape[:2]
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
+
+            # Skip if invalid bbox
+            if x2 <= x1 or y2 <= y1:
+                return
+
+            plate_crop = frame[y1:y2, x1:x2]
+
+            # Generate filename with timestamp and track ID
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+            filename = f"{camera_id}_track{track_id}_{timestamp}_{self.crop_counter:04d}.jpg"
+            filepath = self.crops_dir / filename
+
+            # Save crop
+            cv2.imwrite(str(filepath), plate_crop)
+            self.crop_counter += 1
+            logger.debug(f"Saved plate crop: {filename}")
+
+        except Exception as e:
+            logger.error(f"Failed to save plate crop: {e}")
 
     def _compute_iou_np(self, bbox1: np.ndarray, bbox2: np.ndarray) -> float:
         """Compute IoU between two numpy bboxes [x1, y1, x2, y2]"""
@@ -228,16 +294,19 @@ class ALPRPilot:
         current_skip = self.adaptive_skip_current if self.adaptive_sampling else self.frame_skip
 
         if current_skip > 0 and self.frame_count % (current_skip + 1) != 0:
-            # Skip processing, just increment counter and return original frame
+            # Skip processing, but still draw overlay for visual consistency
             self.frame_count += 1
-            return frame
+            vis_frame = frame.copy()
+            # Use cached values from last processed frame
+            self._draw_overlay(vis_frame, camera_id, self.last_num_detections, self.last_processing_time)
+            return vis_frame
 
         start_time = time.time()
 
         # Detect vehicles
         vehicles = self.detector.detect_vehicles(
             frame,
-            confidence_threshold=0.4,
+            confidence_threshold=0.3,  # Lowered to detect more vehicles
             nms_threshold=0.5
         )
 
@@ -311,7 +380,7 @@ class ALPRPilot:
         plates = self.detector.detect_plates(
             frame,
             vehicle_bboxes=vehicle_bboxes,
-            confidence_threshold=0.6,
+            confidence_threshold=0.25,  # Lowered from 0.6 to detect more plates
             nms_threshold=0.4
         )
 
@@ -363,6 +432,8 @@ class ALPRPilot:
                             self.track_ocr_cache[track_id] = plate_detection
                             self.plate_count += 1
                             logger.info(f"OCR Track {track_id}: {plate_detection.text} (conf: {plate_detection.confidence:.2f})")
+                            # Save to CSV
+                            self._save_plate_read(camera_id, track_id, plate_detection.text, plate_detection.confidence)
                 else:
                     # SINGLE OCR (one at a time)
                     for vehicle_idx, track_id, plate_bbox in tracks_needing_ocr:
@@ -376,6 +447,8 @@ class ALPRPilot:
                             self.track_ocr_cache[track_id] = plate_detection
                             self.plate_count += 1
                             logger.info(f"OCR Track {track_id}: {plate_detection.text} (conf: {plate_detection.confidence:.2f})")
+                            # Save to CSV
+                            self._save_plate_read(camera_id, track_id, plate_detection.text, plate_detection.confidence)
 
             # Use cached OCR results for all tracks
             for vehicle_idx, plate_bboxes in plates.items():
@@ -386,13 +459,20 @@ class ALPRPilot:
                         plate_texts[vehicle_idx] = []
                     plate_texts[vehicle_idx].append(self.track_ocr_cache[track_id])
 
-        # Update stats
+        # Update stats - count unique tracks only
         self.frame_count += 1
-        self.detection_count += len(vehicles)
+        for track_id in vehicle_tracks.values():
+            if track_id is not None:
+                self.unique_vehicles.add(track_id)
 
         # Log OCR throttling stats
         if ocr_runs_this_frame > 0:
             logger.debug(f"OCR runs this frame: {ocr_runs_this_frame} (active tracks: {len(vehicle_tracks)})")
+
+        # Cache values for overlay on skipped frames
+        processing_time = (time.time() - start_time) * 1000
+        self.last_processing_time = processing_time
+        self.last_num_detections = len(vehicles)
 
         # Visualize
         annotated_frame = self._visualize(
@@ -402,7 +482,7 @@ class ALPRPilot:
             plate_texts,
             vehicle_tracks,
             camera_id,
-            processing_time=(time.time() - start_time) * 1000
+            processing_time=processing_time
         )
 
         return annotated_frame
@@ -441,6 +521,10 @@ class ALPRPilot:
                         plate_bbox.x1, plate_bbox.y1,
                         plate_bbox.x2, plate_bbox.y2
                     ])
+
+                    # Save plate crop
+                    track_id = vehicle_tracks.get(idx, -1)
+                    self._save_plate_crop(frame, plate_bbox, track_id, camera_id)
 
                     # Plate bbox (yellow)
                     cv2.rectangle(vis_frame, (px1, py1), (px2, py2), (0, 255, 255), 2)
@@ -510,7 +594,7 @@ class ALPRPilot:
             f"Camera: {camera_id} | OCR: {ocr_status} | Tracking: {tracking_status} | {sampling_info}",
             f"FPS: {self.fps_smoothed:.1f} | Processing: {processing_time:.1f}ms",
             f"Detections: {num_detections} vehicles | Active Tracks: {active_tracks} | Cached OCR: {cached_ocr}",
-            f"Total Vehicles: {self.detection_count} | Plates Read: {self.plate_count} | Uptime: {time.time() - self.start_time:.0f}s"
+            f"Unique Vehicles: {len(self.unique_vehicles)} | Plates Read: {self.plate_count} | Uptime: {time.time() - self.start_time:.0f}s"
         ]
 
         for idx, text in enumerate(texts):
@@ -582,7 +666,7 @@ class ALPRPilot:
                 if self.frame_count % 100 == 0:
                     logger.info(
                         f"Processed {self.frame_count} frames | "
-                        f"{self.detection_count} vehicles detected | "
+                        f"{len(self.unique_vehicles)} unique vehicles | "
                         f"Avg FPS: {self.fps_smoothed:.1f}"
                     )
 
@@ -606,7 +690,7 @@ class ALPRPilot:
         logger.success(
             f"Pilot complete:\n"
             f"  Frames processed: {self.frame_count}\n"
-            f"  Vehicles detected: {self.detection_count}\n"
+            f"  Unique vehicles: {len(self.unique_vehicles)}\n"
             f"  Plates read: {self.plate_count}\n"
             f"  Runtime: {elapsed:.1f}s\n"
             f"  Average FPS: {avg_fps:.2f}"
@@ -630,8 +714,8 @@ def main():
     )
     parser.add_argument(
         "--plate-model",
-        default=None,
-        help="YOLOv11 plate detection model path (optional, uses contour-based detection if not provided)"
+        default="models/yolo11n-plate-custom.engine",
+        help="YOLOv11 plate detection model path (default: models/yolo11n-plate-custom.engine - TensorRT FP16)"
     )
     parser.add_argument(
         "--no-tensorrt",

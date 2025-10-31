@@ -1,0 +1,4 @@
+- remember how to retrain the yolo11n-plate-custom.pt
+- remember to always create new .md files inside the doc files
+- remember to always create new .md files inside the doc folder
+- remember to always create new .md files inside the docs folder

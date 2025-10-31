@@ -44,13 +44,7 @@ onvif:
 # Video file sources (for testing)
 video_sources:
   - id: TEST-001
-    name: "Test Video 720p - Florida Plates"
-    file_path: "720p.mp4"
-    loop: true
-    enabled: true  # Florida plates video
-
-  - id: TEST-002
-    name: "Test Video Short"
-    file_path: "a.mp4"
-    loop: true  # Enable looping
-    enabled: false  # Switched to 720p.mp4
+    name: "Test Video - IMG_6931 (88MB)"
+    file_path: "videos/training/IMG_6931.MOV"
+    loop: false  # Don't loop - run through once
+    enabled: true

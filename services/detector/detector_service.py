@@ -86,8 +86,10 @@ class YOLOv11Detector:
                         int8=True,
                         device=self.device,
                         batch=self.batch_size,
-                        workspace=2,  # 2GB workspace
-                        data='coco.yaml',  # Calibration dataset
+                        workspace=4,  # 4GB workspace for calibration
+                        data='calibration.yaml',  # Calibration dataset from training videos
+                        dynamic=False,  # Disable dynamic shapes for INT8
+                        imgsz=640,  # Fixed input size
                     )
                 else:
                     logger.info("Exporting model to TensorRT with FP16 precision...")
@@ -194,65 +196,49 @@ class YOLOv11Detector:
             return self._detect_plates_contour(frame, vehicle_bboxes)
 
         # Use custom plate detection model
-        plates = {}
+        # Search entire frame since model was trained on full frames
+        results = self.plate_model.predict(
+            frame,
+            conf=confidence_threshold,
+            iou=nms_threshold,
+            verbose=False,
+            device=self.device,
+            half=self.fp16,
+            imgsz=416  # Match training size
+        )
 
-        if vehicle_bboxes:
-            # Search for plates within each vehicle bbox
-            for idx, vehicle_bbox in enumerate(vehicle_bboxes):
-                # Extract vehicle ROI
-                x1, y1, x2, y2 = map(int, [vehicle_bbox.x1, vehicle_bbox.y1,
-                                            vehicle_bbox.x2, vehicle_bbox.y2])
-                vehicle_roi = frame[y1:y2, x1:x2]
-
-                if vehicle_roi.size == 0:
-                    continue
-
-                # Run plate detection on ROI
-                results = self.plate_model.predict(
-                    vehicle_roi,
-                    conf=confidence_threshold,
-                    iou=nms_threshold,
-                    verbose=False,
-                    device=self.device,
-                    half=self.fp16
+        # Collect all detected plates
+        all_plate_bboxes = []
+        for result in results:
+            for box in result.boxes:
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                all_plate_bboxes.append(
+                    BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2)
                 )
 
-                plate_bboxes = []
-                for result in results:
-                    for box in result.boxes:
-                        # Convert bbox to global coordinates
-                        px1, py1, px2, py2 = box.xyxy[0].cpu().numpy()
-                        global_bbox = BoundingBox(
-                            x1=x1 + px1,
-                            y1=y1 + py1,
-                            x2=x1 + px2,
-                            y2=y1 + py2
-                        )
-                        plate_bboxes.append(global_bbox)
+        # Match plates to vehicles by overlap
+        plates = {}
+        if vehicle_bboxes and all_plate_bboxes:
+            for plate_bbox in all_plate_bboxes:
+                # Find which vehicle this plate belongs to
+                best_iou = 0
+                best_vehicle_idx = None
 
-                if plate_bboxes:
-                    plates[idx] = plate_bboxes
-        else:
-            # Search entire frame
-            results = self.plate_model.predict(
-                frame,
-                conf=confidence_threshold,
-                iou=nms_threshold,
-                verbose=False,
-                device=self.device,
-                half=self.fp16
-            )
+                for idx, vehicle_bbox in enumerate(vehicle_bboxes):
+                    # Check if plate center is inside vehicle bbox
+                    plate_cx = (plate_bbox.x1 + plate_bbox.x2) / 2
+                    plate_cy = (plate_bbox.y1 + plate_bbox.y2) / 2
 
-            plate_bboxes = []
-            for result in results:
-                for box in result.boxes:
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    plate_bboxes.append(
-                        BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2)
-                    )
-
-            if plate_bboxes:
-                plates[0] = plate_bboxes
+                    if (vehicle_bbox.x1 <= plate_cx <= vehicle_bbox.x2 and
+                        vehicle_bbox.y1 <= plate_cy <= vehicle_bbox.y2):
+                        # Plate center is inside vehicle - assign it
+                        if idx not in plates:
+                            plates[idx] = []
+                        plates[idx].append(plate_bbox)
+                        break
+        elif all_plate_bboxes:
+            # No vehicles provided - return all plates as index 0
+            plates[0] = all_plate_bboxes
 
         inference_time = (time.time() - start_time) * 1000
         logger.debug(f"Plate detection: {sum(len(p) for p in plates.values())} plates in {inference_time:.1f}ms")

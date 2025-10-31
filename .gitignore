@@ -115,6 +115,12 @@ plates/
 runs/
 exports/
 
+# Video folder
+videos/
+
+# Models folder
+models/
+
 # Datasets (large calibration/training data)
 datasets/
 training_data/
