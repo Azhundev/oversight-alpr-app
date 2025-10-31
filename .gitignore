@@ -146,6 +146,9 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
+# Documentation folder
+docs/
+
 # Documentation builds
 docs/_build/
 
