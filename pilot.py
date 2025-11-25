@@ -70,8 +70,9 @@ class ALPRPilot:
         self.crops_dir = self.output_dir / "crops"
         self.crops_dir.mkdir(exist_ok=True)
 
-        # Initialize plate reads CSV file
-        self.plate_csv_path = self.output_dir / "plate_reads.csv"
+        # Initialize plate reads CSV file with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.plate_csv_path = self.output_dir / f"plate_reads_{timestamp}.csv"
         self._init_plate_csv()
 
         # Counter for saved crops
@@ -128,7 +129,7 @@ class ALPRPilot:
         self.track_frame_count = {}  # track_id -> frame count
 
         # OCR throttling parameters
-        self.ocr_min_track_frames = 3  # Wait for track to stabilize
+        self.ocr_min_track_frames = 2  # Reduced for faster gate response
 
         # Attribute inference parameters
         self.attr_min_confidence = 0.8  # Run attributes on high-confidence frames
@@ -148,14 +149,11 @@ class ALPRPilot:
 
     def _init_plate_csv(self):
         """Initialize CSV file for plate reads"""
-        # Create CSV with headers if it doesn't exist
-        if not self.plate_csv_path.exists():
-            with open(self.plate_csv_path, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(['Timestamp', 'Camera_ID', 'Track_ID', 'Plate_Text', 'Confidence', 'Frame_Number'])
-            logger.info(f"Created plate reads CSV: {self.plate_csv_path}")
-        else:
-            logger.info(f"Appending to existing CSV: {self.plate_csv_path}")
+        # Always create new CSV with timestamp in filename
+        with open(self.plate_csv_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Timestamp', 'Camera_ID', 'Track_ID', 'Plate_Text', 'Confidence', 'Frame_Number'])
+        logger.info(f"Created plate reads CSV: {self.plate_csv_path}")
 
     def _save_plate_read(self, camera_id: str, track_id: int, plate_text: str, confidence: float):
         """Save a plate read to CSV file"""
@@ -306,7 +304,7 @@ class ALPRPilot:
         # Detect vehicles
         vehicles = self.detector.detect_vehicles(
             frame,
-            confidence_threshold=0.3,  # Lowered to detect more vehicles
+            confidence_threshold=0.25,  # Lowered to detect more vehicles for gate control
             nms_threshold=0.5
         )
 
@@ -380,23 +378,17 @@ class ALPRPilot:
         plates = self.detector.detect_plates(
             frame,
             vehicle_bboxes=vehicle_bboxes,
-            confidence_threshold=0.25,  # Lowered from 0.6 to detect more plates
+            confidence_threshold=0.20,  # Lowered threshold for gate control
             nms_threshold=0.4
         )
 
         # Run OCR on detected plates (THROTTLED - once per stable track)
-        # Use BATCH inference when multiple tracks need OCR
+        # SINGLE INFERENCE ONLY - for gate control we need immediate processing
         plate_texts = {}  # Map vehicle index to plate text
         ocr_runs_this_frame = 0
 
-        # Batch OCR configuration
-        enable_batch_ocr = True  # Set to False to disable batching
-        batch_min_size = 2  # Only batch if 2+ plates need OCR
-
         if self.ocr and plates:
-            # Collect all tracks that need OCR
-            tracks_needing_ocr = []  # List of (vehicle_idx, track_id, plate_bbox)
-
+            # Process each track individually (NO BATCHING for gate control)
             for vehicle_idx, plate_bboxes in plates.items():
                 track_id = vehicle_tracks.get(vehicle_idx)
 
@@ -407,48 +399,21 @@ class ALPRPilot:
                 if self.should_run_ocr(track_id):
                     # Use first plate only (assumes one plate per vehicle)
                     plate_bbox = plate_bboxes[0]
-                    tracks_needing_ocr.append((vehicle_idx, track_id, plate_bbox))
+                    ocr_runs_this_frame += 1
 
-            # Run OCR: batch if multiple plates, single if just one
-            if tracks_needing_ocr:
-                ocr_runs_this_frame = len(tracks_needing_ocr)
-
-                if enable_batch_ocr and len(tracks_needing_ocr) >= batch_min_size:
-                    # BATCH OCR
-                    logger.debug(f"Running batch OCR on {len(tracks_needing_ocr)} plates")
-
-                    bboxes = [item[2] for item in tracks_needing_ocr]
-                    batch_results = self.ocr.recognize_plates_batch(
+                    # SINGLE OCR - immediate processing for gate control
+                    plate_detection = self.ocr.recognize_plate(
                         frame,
-                        bboxes,
+                        plate_bbox,
                         preprocess=True
                     )
 
-                    # Cache results
-                    for idx, (vehicle_idx, track_id, _) in enumerate(tracks_needing_ocr):
-                        plate_detection = batch_results[idx]
-
-                        if plate_detection:
-                            self.track_ocr_cache[track_id] = plate_detection
-                            self.plate_count += 1
-                            logger.info(f"OCR Track {track_id}: {plate_detection.text} (conf: {plate_detection.confidence:.2f})")
-                            # Save to CSV
-                            self._save_plate_read(camera_id, track_id, plate_detection.text, plate_detection.confidence)
-                else:
-                    # SINGLE OCR (one at a time)
-                    for vehicle_idx, track_id, plate_bbox in tracks_needing_ocr:
-                        plate_detection = self.ocr.recognize_plate(
-                            frame,
-                            plate_bbox,
-                            preprocess=True
-                        )
-
-                        if plate_detection:
-                            self.track_ocr_cache[track_id] = plate_detection
-                            self.plate_count += 1
-                            logger.info(f"OCR Track {track_id}: {plate_detection.text} (conf: {plate_detection.confidence:.2f})")
-                            # Save to CSV
-                            self._save_plate_read(camera_id, track_id, plate_detection.text, plate_detection.confidence)
+                    if plate_detection:
+                        self.track_ocr_cache[track_id] = plate_detection
+                        self.plate_count += 1
+                        logger.info(f"OCR Track {track_id}: {plate_detection.text} (conf: {plate_detection.confidence:.2f})")
+                        # Save to CSV
+                        self._save_plate_read(camera_id, track_id, plate_detection.text, plate_detection.confidence)
 
             # Use cached OCR results for all tracks
             for vehicle_idx, plate_bboxes in plates.items():
@@ -714,8 +679,8 @@ def main():
     )
     parser.add_argument(
         "--plate-model",
-        default="models/yolo11n-plate-custom.engine",
-        help="YOLOv11 plate detection model path (default: models/yolo11n-plate-custom.engine - TensorRT FP16)"
+        default="models/yolo11n-plate.pt",
+        help="YOLOv11 plate detection model path (default: models/yolo11n-plate.pt)"
     )
     parser.add_argument(
         "--no-tensorrt",
@@ -745,13 +710,14 @@ def main():
     parser.add_argument(
         "--skip-frames",
         type=int,
-        default=2,
-        help="Process every Nth frame (0=all, 1=every other, 2=every 3rd, etc.) - default: 2 for parking gates"
+        default=0,
+        help="Process every Nth frame (0=all, 1=every other, 2=every 3rd, etc.) - default: 0 for gate control (process all frames)"
     )
     parser.add_argument(
         "--no-adaptive-sampling",
         action="store_true",
-        help="Disable adaptive frame sampling (use fixed skip rate)"
+        default=True,
+        help="Disable adaptive frame sampling (use fixed skip rate) - default: disabled for gate control"
     )
 
     args = parser.parse_args()
