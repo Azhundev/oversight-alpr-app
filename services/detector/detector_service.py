@@ -204,7 +204,7 @@ class YOLOv11Detector:
             verbose=False,
             device=self.device,
             half=self.fp16,
-            imgsz=416  # Match training size
+            imgsz=640  # Standard YOLO input size
         )
 
         # Collect all detected plates

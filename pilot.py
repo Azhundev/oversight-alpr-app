@@ -125,11 +125,14 @@ class ALPRPilot:
 
         # Track-based OCR throttling and attribute caching
         self.track_ocr_cache = {}  # track_id -> PlateDetection
+        self.track_ocr_attempts = {}  # track_id -> number of OCR attempts
         self.track_attributes_cache = {}  # track_id -> {color, make, model}
         self.track_frame_count = {}  # track_id -> frame count
 
         # OCR throttling parameters
         self.ocr_min_track_frames = 2  # Reduced for faster gate response
+        self.ocr_min_confidence = 0.75  # Minimum confidence to accept OCR result
+        self.ocr_max_attempts = 5  # Maximum OCR attempts per track
 
         # Attribute inference parameters
         self.attr_min_confidence = 0.8  # Run attributes on high-confidence frames
@@ -222,12 +225,20 @@ class ALPRPilot:
         Returns:
             bool: True if OCR should run
         """
-        # Already have OCR result for this track?
-        if track_id in self.track_ocr_cache:
-            return False
-
         # Track stable enough (minimum frames)?
         if self.track_frame_count.get(track_id, 0) < self.ocr_min_track_frames:
+            return False
+
+        # Already have high-confidence OCR result for this track?
+        if track_id in self.track_ocr_cache:
+            cached_result = self.track_ocr_cache[track_id]
+            # If confidence is high enough, don't retry
+            if cached_result.confidence >= self.ocr_min_confidence:
+                return False
+
+        # Check if we've exceeded max attempts
+        attempts = self.track_ocr_attempts.get(track_id, 0)
+        if attempts >= self.ocr_max_attempts:
             return False
 
         return True
@@ -341,6 +352,7 @@ class ALPRPilot:
             active_tracks = self.tracker.update(detections)
 
             # Map vehicle detections to track IDs
+            min_iou_threshold = 0.1  # Minimum IoU to consider a match
             for idx, vehicle in enumerate(vehicles):
                 # Find matching track by IoU
                 best_iou = 0
@@ -355,7 +367,8 @@ class ALPRPilot:
                         best_iou = iou
                         best_track = track
 
-                if best_track:
+                # Only assign if IoU is above threshold
+                if best_track and best_iou >= min_iou_threshold:
                     track_id = best_track.track_id
                     vehicle_tracks[idx] = track_id
 
@@ -367,6 +380,10 @@ class ALPRPilot:
                     # Cache vehicle attributes on first high-confidence frame
                     if self.should_cache_attributes(track_id, vehicle.confidence):
                         self.cache_vehicle_attributes(track_id, vehicle)
+                else:
+                    # No matching track - log warning
+                    if len(active_tracks) > 0:
+                        logger.debug(f"Vehicle {idx} has no matching track (best IoU: {best_iou:.3f})")
         else:
             # No tracking - assign sequential IDs
             for idx, vehicle in enumerate(vehicles):
@@ -401,6 +418,11 @@ class ALPRPilot:
                     plate_bbox = plate_bboxes[0]
                     ocr_runs_this_frame += 1
 
+                    # Track OCR attempts
+                    if track_id not in self.track_ocr_attempts:
+                        self.track_ocr_attempts[track_id] = 0
+                    self.track_ocr_attempts[track_id] += 1
+
                     # SINGLE OCR - immediate processing for gate control
                     plate_detection = self.ocr.recognize_plate(
                         frame,
@@ -409,11 +431,26 @@ class ALPRPilot:
                     )
 
                     if plate_detection:
-                        self.track_ocr_cache[track_id] = plate_detection
-                        self.plate_count += 1
-                        logger.info(f"OCR Track {track_id}: {plate_detection.text} (conf: {plate_detection.confidence:.2f})")
-                        # Save to CSV
-                        self._save_plate_read(camera_id, track_id, plate_detection.text, plate_detection.confidence)
+                        # Update cache (may overwrite low-confidence result with better one)
+                        is_new_read = track_id not in self.track_ocr_cache
+                        is_better = (track_id in self.track_ocr_cache and
+                                   plate_detection.confidence > self.track_ocr_cache[track_id].confidence)
+
+                        if is_new_read or is_better:
+                            self.track_ocr_cache[track_id] = plate_detection
+
+                            # Only count and log unique high-confidence reads
+                            if is_new_read:
+                                self.plate_count += 1
+
+                            conf_indicator = "HIGH" if plate_detection.confidence >= self.ocr_min_confidence else "LOW"
+                            logger.info(f"OCR Track {track_id} [{conf_indicator}]: {plate_detection.text} (conf: {plate_detection.confidence:.2f}, attempt: {self.track_ocr_attempts[track_id]})")
+
+                            # Save to CSV only for high-confidence reads
+                            if plate_detection.confidence >= self.ocr_min_confidence:
+                                self._save_plate_read(camera_id, track_id, plate_detection.text, plate_detection.confidence)
+                    else:
+                        logger.debug(f"OCR Track {track_id}: No text detected (attempt: {self.track_ocr_attempts[track_id]})")
 
             # Use cached OCR results for all tracks
             for vehicle_idx, plate_bboxes in plates.items():
