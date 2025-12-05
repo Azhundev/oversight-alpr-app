@@ -76,16 +76,17 @@ class KalmanBoxTracker:
             [0, 0, 0, 1, 0, 0, 0, 0],  # measure r
         ])
 
-        # Measurement noise covariance
-        self.kf.R[2:, 2:] *= 10.0  # Higher uncertainty for area and aspect ratio
+        # Measurement noise covariance - LOWER values = trust measurements MORE
+        self.kf.R[2:, 2:] *= 5.0  # Moderate uncertainty for area and aspect ratio (was 10.0)
 
-        # Process noise covariance
-        self.kf.P[4:, 4:] *= 1000.0  # High uncertainty for velocities
-        self.kf.P *= 10.0
+        # Process noise covariance - reflects belief in our model
+        self.kf.P[4:, 4:] *= 500.0  # Moderate uncertainty for velocities (was 1000.0)
+        self.kf.P *= 5.0  # Lower initial uncertainty (was 10.0)
 
-        # Process noise
-        self.kf.Q[-1, -1] *= 0.01
-        self.kf.Q[4:, 4:] *= 0.01
+        # Process noise - HIGHER values = expect more process variation
+        # For motion video with bbox jitter, we need higher process noise
+        self.kf.Q[-1, -1] *= 0.1  # Allow more aspect ratio change (was 0.01)
+        self.kf.Q[4:, 4:] *= 0.1  # Allow more velocity change (was 0.01)
 
         # Initialize state with bbox
         self.kf.x[:4] = self._bbox_to_z(bbox)
@@ -328,6 +329,14 @@ class ByteTrackService:
             high_detections, self.tracked_tracks
         )
 
+        if self.frame_id % 30 == 0:
+            logger.debug(
+                f"Frame {self.frame_id}: High conf matches={len(matches_high)}, "
+                f"unmatched_tracks={len(unmatched_track_indices)}, "
+                f"unmatched_dets={len(unmatched_det_indices)}, "
+                f"tracked={len(self.tracked_tracks)}, lost={len(self.lost_tracks)}"
+            )
+
         # === Second association: remaining tracks with low confidence detections ===
         # Get the actual unmatched tracks (not indices)
         unmatched_tracks = [self.tracked_tracks[i] for i in unmatched_track_indices if i < len(self.tracked_tracks)]
@@ -336,27 +345,47 @@ class ByteTrackService:
         )
 
         # Mark tracks that remain unmatched as lost
+        # But only if they've been unmatched for long enough (not immediately)
+        tracks_to_mark_lost = []
         for i in unmatched_tracks_second_indices:
             if i < len(unmatched_tracks):
                 track = unmatched_tracks[i]
                 if track.state != TrackState.LOST:
-                    track.mark_lost()
-                    self.lost_tracks.append(track)
+                    # Only mark as lost if time_since_update exceeds a threshold
+                    # Allow several frames of prediction-only tracking (important for occlusions/missed detections)
+                    if track.kalman_filter.time_since_update >= 15:  # Allow 15 frames (~0.5s at 30fps) without match
+                        track.mark_lost()
+                        tracks_to_mark_lost.append(track)
+                        self.lost_tracks.append(track)
+                        logger.debug(f"Frame {self.frame_id}: Track {track.track_id} marked as LOST (no match for {track.kalman_filter.time_since_update} frames)")
+
+        # Remove lost tracks from tracked_tracks
+        for track in tracks_to_mark_lost:
+            if track in self.tracked_tracks:
+                self.tracked_tracks.remove(track)
 
         # === Third association: lost tracks with remaining high confidence detections ===
         # Filter valid indices only
         remaining_high_detections = [high_detections[i] for i in unmatched_det_indices if i < len(high_detections)]
         matches_lost, unmatched_lost_indices, unmatched_high_indices = self._associate_detections_to_tracks(
-            remaining_high_detections, self.lost_tracks, threshold=0.5
+            remaining_high_detections, self.lost_tracks, threshold=0.3  # More lenient for reactivation (was 0.5)
         )
 
         # Re-activate matched lost tracks
+        tracks_to_reactivate = []
         for i_track, i_det in matches_lost:
             if i_track < len(self.lost_tracks) and i_det < len(remaining_high_detections):
                 track = self.lost_tracks[i_track]
                 det = remaining_high_detections[i_det]
                 track.re_activate(det, self.frame_id)
+                tracks_to_reactivate.append(track)
                 self.tracked_tracks.append(track)
+                logger.info(f"Frame {self.frame_id}: RE-ACTIVATED track {track.track_id} (was lost for {self.frame_id - track.frame_id} frames)")
+
+        # Remove re-activated tracks from lost_tracks
+        for track in tracks_to_reactivate:
+            if track in self.lost_tracks:
+                self.lost_tracks.remove(track)
 
         # Create new tracks for unmatched high confidence detections
         for i in unmatched_high_indices:
@@ -366,6 +395,7 @@ class ByteTrackService:
                     new_track = Track(det, self._next_id())
                     new_track.activate(self.frame_id)
                     self.tracked_tracks.append(new_track)
+                    logger.info(f"Frame {self.frame_id}: Created new track {new_track.track_id} (conf: {det.confidence:.2f})")
 
         # Update lost tracks buffer
         self.lost_tracks = [
@@ -378,6 +408,9 @@ class ByteTrackService:
             if self.frame_id - track.frame_id > self.track_buffer:
                 track.mark_removed()
                 self.removed_tracks.append(track)
+
+        # Merge overlapping tracks (prevent fragmentation of same vehicle)
+        self._merge_overlapping_tracks()
 
         # Return only active tracked tracks
         output_tracks = [t for t in self.tracked_tracks if t.is_activated]
@@ -414,8 +447,19 @@ class ByteTrackService:
 
         iou_matrix = self._compute_iou_matrix(detection_boxes, track_boxes)
 
+        # Debug: log max IoU values when matching fails
+        if len(detections) > 0 and len(tracks) > 0 and self.frame_id % 10 == 0:
+            max_ious = iou_matrix.max(axis=1) if iou_matrix.size > 0 else []
+            logger.debug(
+                f"Frame {self.frame_id}: Association - "
+                f"{len(detections)} dets vs {len(tracks)} tracks, "
+                f"max IoUs: {max_ious}, threshold: {threshold}"
+            )
+
         # Convert IoU to cost (1 - IoU)
-        cost_matrix = 1 - iou_matrix
+        # IoU matrix is (N_detections, M_tracks), but lapjv expects (N_tracks, M_detections)
+        # So we need to transpose
+        cost_matrix = (1 - iou_matrix).T
 
         # Solve linear assignment problem
         matches, unmatched_tracks, unmatched_detections = self._linear_assignment(
@@ -474,17 +518,26 @@ class ByteTrackService:
         if cost_matrix.size == 0:
             return [], list(range(cost_matrix.shape[0])), list(range(cost_matrix.shape[1]))
 
+        # Store original matrix dimensions (before lapjv potentially pads it)
+        n_rows, n_cols = cost_matrix.shape
+
         # Solve using lap (Jonker-Volgenant algorithm)
         # lapjv returns: (cost, row_to_col, col_to_row) when return_cost=True
         # row_to_col[i] = j means row i is assigned to column j
+        # NOTE: extend_cost=True pads the matrix to make it square, so indices may be out of range
         _, row_to_col, col_to_row = lapjv(cost_matrix, extend_cost=True, cost_limit=threshold, return_cost=True)
 
         matches = []
         unmatched_rows = []
-        unmatched_cols = list(range(cost_matrix.shape[1]))
+        unmatched_cols = list(range(n_cols))
 
         for i, j in enumerate(row_to_col):
-            if j >= 0 and j < cost_matrix.shape[1] and cost_matrix[i, j] <= threshold:
+            # Skip if row index is out of range (from padding)
+            if i >= n_rows:
+                continue
+
+            # Check if assignment is valid (within original matrix bounds and under threshold)
+            if j >= 0 and j < n_cols and cost_matrix[i, j] <= threshold:
                 matches.append((i, j))
                 if j in unmatched_cols:
                     unmatched_cols.remove(j)
@@ -511,6 +564,75 @@ class ByteTrackService:
             if area >= self.min_box_area:
                 filtered.append(det)
         return filtered
+
+    def _merge_overlapping_tracks(self):
+        """
+        Merge tracks that have high IoU overlap (likely same vehicle)
+        This prevents track fragmentation where one vehicle gets multiple IDs
+        """
+        if len(self.tracked_tracks) < 2:
+            return
+
+        merge_threshold = 0.6  # IoU threshold for merging (was 0.7, lowered to catch more fragmentations)
+        tracks_to_remove = set()
+
+        # Compare all pairs of active tracks
+        for i in range(len(self.tracked_tracks)):
+            if i in tracks_to_remove:
+                continue
+
+            track_i = self.tracked_tracks[i]
+            bbox_i = track_i.tlbr
+
+            for j in range(i + 1, len(self.tracked_tracks)):
+                if j in tracks_to_remove:
+                    continue
+
+                track_j = self.tracked_tracks[j]
+                bbox_j = track_j.tlbr
+
+                # Compute IoU between tracks
+                iou = self._compute_iou_between_boxes(bbox_i, bbox_j)
+
+                if iou >= merge_threshold:
+                    # Merge: keep older track, remove newer one
+                    if track_i.start_frame <= track_j.start_frame:
+                        keep_track, remove_track = track_i, track_j
+                        remove_idx = j
+                    else:
+                        keep_track, remove_track = track_j, track_i
+                        remove_idx = i
+                        tracks_to_remove.add(i)
+                        break  # Don't process track_i anymore
+
+                    tracks_to_remove.add(remove_idx)
+                    logger.info(
+                        f"Frame {self.frame_id}: Merged track {remove_track.track_id} → {keep_track.track_id} "
+                        f"(IoU: {iou:.2f})"
+                    )
+
+        # Remove merged tracks
+        for idx in sorted(tracks_to_remove, reverse=True):
+            if idx < len(self.tracked_tracks):
+                removed_track = self.tracked_tracks.pop(idx)
+                removed_track.mark_removed()
+
+    def _compute_iou_between_boxes(self, bbox1: np.ndarray, bbox2: np.ndarray) -> float:
+        """Compute IoU between two bounding boxes [x1, y1, x2, y2]"""
+        x1_i = max(bbox1[0], bbox2[0])
+        y1_i = max(bbox1[1], bbox2[1])
+        x2_i = min(bbox1[2], bbox2[2])
+        y2_i = min(bbox1[3], bbox2[3])
+
+        if x2_i < x1_i or y2_i < y1_i:
+            return 0.0
+
+        intersection = (x2_i - x1_i) * (y2_i - y1_i)
+        area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
+        area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
+        union = area1 + area2 - intersection
+
+        return intersection / union if union > 0 else 0.0
 
     def _next_id(self) -> int:
         """Generate next track ID"""

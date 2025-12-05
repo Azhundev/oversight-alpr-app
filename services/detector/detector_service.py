@@ -73,6 +73,20 @@ class YOLOv11Detector:
 
     def _load_model(self, model_path: str) -> YOLO:
         """Load and optimize YOLO model"""
+
+        # Check if TensorRT engine already exists
+        if self.use_tensorrt and not model_path.endswith('.engine'):
+            # Look for existing .engine file
+            engine_path = str(Path(model_path).with_suffix('.engine'))
+
+            if Path(engine_path).exists():
+                logger.info(f"Loading existing TensorRT engine: {engine_path}")
+                model = YOLO(engine_path)
+                return model
+            else:
+                logger.info(f"No existing TensorRT engine found, will create: {engine_path}")
+
+        # Load PyTorch model
         model = YOLO(model_path)
 
         # Export to TensorRT if enabled (Jetson optimization)

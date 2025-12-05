@@ -22,10 +22,12 @@ ocr:
   # Preprocessing
   preprocessing:
     # Upscale small plates for better OCR
-    min_plate_height: 32
-    target_height: 64  # Upscale to this height if smaller
-    denoise: true
-    enhance_contrast: true
+    min_plate_height: 48
+    target_height: 128  # Higher for better OCR accuracy
+    denoise: false  # DISABLED - too aggressive, destroys text
+    enhance_contrast: false  # DISABLED - let PaddleOCR handle it
+    sharpen: false  # DISABLED - causes artifacts
+    remove_color: false  # DISABLED - PaddleOCR works better with color
     adaptive_threshold: false  # Use PaddleOCR's built-in preprocessing
 
   # Post-processing
@@ -34,10 +36,10 @@ ocr:
     use_whitelist: true
     whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-    # Confidence filtering
-    min_confidence: 0.7
-    min_text_length: 3
-    max_text_length: 10
+    # Confidence filtering (lowered for better detection)
+    min_confidence: 0.40  # Lower to catch more plates (was 0.50)
+    min_text_length: 3  # Minimum characters
+    max_text_length: 10  # Maximum characters
 
   # Performance
   performance:

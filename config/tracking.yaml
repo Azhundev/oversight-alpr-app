@@ -6,10 +6,10 @@ tracking:
 
   # ByteTrack Settings
   bytetrack:
-    track_thresh: 0.3  # Lower threshold to match vehicle detection
-    track_buffer: 60  # Longer buffer for vehicles leaving frame
-    match_thresh: 0.6  # Lower IoU for parking lot (vehicles move slowly)
-    min_box_area: 1000  # Larger minimum to filter noise
+    track_thresh: 0.20  # Lower threshold for better tracking continuity (from 0.25)
+    track_buffer: 90  # Longer buffer to handle occlusions/parking
+    match_thresh: 0.25  # More lenient IoU threshold for matching - lower = more lenient (from 0.3)
+    min_box_area: 400  # Lower minimum to catch smaller/distant vehicles (from 500)
 
   # NvDCF Settings (NVIDIA DeepStream Tracker)
   nvdcf:

@@ -75,6 +75,7 @@ class PaddleOCRService:
     def preprocess_plate_crop(self, plate_crop: np.ndarray) -> np.ndarray:
         """
         Preprocess license plate crop for better OCR accuracy
+        Special handling for Florida plates (orange logo removal)
 
         Args:
             plate_crop: Cropped plate image (BGR)
@@ -82,6 +83,22 @@ class PaddleOCRService:
         Returns:
             Preprocessed image
         """
+        # Handle Florida plate orange logo interference
+        # The orange logo in the center is being misread as 'C'
+        if len(plate_crop.shape) == 3 and self.preprocess_config.get('remove_color', False):
+            # Convert to HSV to isolate orange regions
+            hsv = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2HSV)
+
+            # Orange color range (Florida logo)
+            lower_orange = np.array([5, 100, 100])
+            upper_orange = np.array([25, 255, 255])
+
+            # Create mask for orange regions
+            orange_mask = cv2.inRange(hsv, lower_orange, upper_orange)
+
+            # Inpaint orange regions with surrounding colors (removes logo)
+            plate_crop = cv2.inpaint(plate_crop, orange_mask, 3, cv2.INPAINT_TELEA)
+
         # Convert to grayscale
         if len(plate_crop.shape) == 3:
             gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
@@ -111,6 +128,12 @@ class PaddleOCRService:
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             gray = clahe.apply(gray)
 
+        # Sharpen for motion blur (important for blurry video)
+        if self.preprocess_config.get('sharpen', False):
+            # Unsharp mask for sharpening
+            gaussian = cv2.GaussianBlur(gray, (0, 0), 2.0)
+            gray = cv2.addWeighted(gray, 1.5, gaussian, -0.5, 0)
+
         # Convert back to BGR for PaddleOCR
         preprocessed = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
@@ -124,11 +147,12 @@ class PaddleOCRService:
     ) -> Optional[PlateDetection]:
         """
         Recognize license plate text from bounding box
+        Uses multi-strategy approach: tries both raw and preprocessed
 
         Args:
             frame: Full frame image (BGR)
             bbox: Plate bounding box
-            preprocess: Apply preprocessing
+            preprocess: Apply preprocessing (will try both strategies)
 
         Returns:
             PlateDetection object or None if recognition fails
@@ -153,16 +177,54 @@ class PaddleOCRService:
             logger.warning("Empty plate crop")
             return None
 
-        # Preprocess
-        if preprocess:
-            plate_crop = self.preprocess_plate_crop(plate_crop)
+        # Multi-strategy OCR: try multiple approaches and pick best result
+        best_result = None
+        best_confidence = 0.0
 
-        # Run OCR
+        # Strategy 1: Raw image (no preprocessing)
+        result_raw = self._run_ocr_on_crop(plate_crop.copy(), strategy="raw", bbox=bbox)
+        if result_raw and result_raw.confidence > best_confidence:
+            best_result = result_raw
+            best_confidence = result_raw.confidence
+
+        # Strategy 2: With preprocessing (if enabled)
+        if preprocess:
+            preprocessed = self.preprocess_plate_crop(plate_crop.copy())
+            result_preprocessed = self._run_ocr_on_crop(preprocessed, strategy="preprocessed", bbox=bbox)
+            if result_preprocessed and result_preprocessed.confidence > best_confidence:
+                best_result = result_preprocessed
+                best_confidence = result_preprocessed.confidence
+
+        # Strategy 3: Upscaled 2x (for small plates)
+        plate_h = y2 - y1
+        if plate_h < 80:  # Small plate, try upscaling
+            upscaled = cv2.resize(plate_crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+            result_upscaled = self._run_ocr_on_crop(upscaled, strategy="upscaled", bbox=bbox)
+            if result_upscaled and result_upscaled.confidence > best_confidence:
+                best_result = result_upscaled
+                best_confidence = result_upscaled.confidence
+
+        if best_result:
+            logger.debug(f"Best OCR result: '{best_result.text}' (conf: {best_result.confidence:.2f}, strategy: {best_result.raw_text})")
+
+        return best_result
+
+    def _run_ocr_on_crop(self, plate_crop: np.ndarray, strategy: str = "raw", bbox: BoundingBox = None) -> Optional[PlateDetection]:
+        """
+        Run OCR on a single plate crop
+
+        Args:
+            plate_crop: Plate image
+            strategy: Strategy name for logging
+            bbox: Original bounding box (for PlateDetection)
+
+        Returns:
+            PlateDetection or None
+        """
         try:
-            result = self.ocr.ocr(plate_crop, cls=True)
+            result = self.ocr.ocr(plate_crop, cls=False)
 
             if not result or not result[0]:
-                logger.debug("No text detected in plate crop")
                 return None
 
             # Extract text and confidence from results
@@ -178,7 +240,6 @@ class PaddleOCRService:
                         best_confidence = confidence
 
             if not best_text:
-                logger.debug("Empty text result from OCR")
                 return None
 
             # Post-process text
@@ -187,33 +248,26 @@ class PaddleOCRService:
 
             # Filter by confidence
             if best_confidence < self.min_confidence:
-                logger.debug(f"Low confidence OCR result: {best_confidence:.2f} < {self.min_confidence}")
                 return None
 
             # Filter by text length
             if len(normalized_text) < self.min_text_length:
-                logger.debug(f"Text too short: {len(normalized_text)} < {self.min_text_length}")
                 return None
 
             if len(normalized_text) > self.max_text_length:
-                logger.debug(f"Text too long: {len(normalized_text)} > {self.max_text_length}")
                 return None
 
-            # Create PlateDetection
+            # Create PlateDetection with strategy name in raw_text for debugging
             plate_detection = PlateDetection(
                 text=normalized_text,
                 confidence=float(best_confidence),
-                bbox=bbox,
-                raw_text=raw_text,
+                bbox=bbox if bbox else BoundingBox(x1=0, y1=0, x2=0, y2=0),
+                raw_text=f"{raw_text}[{strategy}]",
             )
-
-            inference_time = (time.time() - start_time) * 1000
-            logger.debug(f"OCR: '{normalized_text}' (conf: {best_confidence:.2f}) in {inference_time:.1f}ms")
 
             return plate_detection
 
         except Exception as e:
-            logger.error(f"OCR recognition failed: {e}")
             return None
 
     def recognize_plates_batch(
