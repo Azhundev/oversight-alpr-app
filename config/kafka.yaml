@@ -1,0 +1,76 @@
+# Kafka Configuration for ALPR Event Publishing
+
+# Kafka Broker Configuration
+kafka:
+  # Broker addresses (comma-separated for multiple brokers)
+  bootstrap_servers: "localhost:9092"  # Change to your Kafka broker address
+  # For cloud: "kafka-1.example.com:9092,kafka-2.example.com:9092,kafka-3.example.com:9092"
+  # For AWS MSK: "b-1.msk-cluster.abc123.kafka.us-east-1.amazonaws.com:9092,..."
+  # For Confluent Cloud: "pkc-xxxxx.us-east-1.aws.confluent.cloud:9092"
+
+  # Client identification
+  client_id: "alpr-jetson-producer"
+
+  # Topic configuration
+  topics:
+    plate_events: "alpr.plates.detected"           # Main plate detection events
+    vehicle_tracks: "alpr.vehicles.tracked"        # Vehicle tracking events (optional)
+    system_health: "alpr.system.health"            # System health/telemetry (optional)
+
+  # Producer settings
+  producer:
+    # Compression (recommended: gzip for good compression + CPU balance)
+    # Options: gzip, snappy, lz4, zstd, or none
+    compression_type: "gzip"
+
+    # Acknowledgment level
+    # "all" (or "-1"): Wait for all in-sync replicas (strongest durability)
+    # "1": Wait for leader only (faster, less durable)
+    # "0": Fire-and-forget (fastest, no guarantees)
+    acks: "all"
+
+    # Retry configuration
+    retries: 3
+    retry_backoff_ms: 100
+
+    # Idempotence (exactly-once semantics within a partition)
+    enable_idempotence: true
+
+    # Batching and buffering
+    batch_size: 16384         # 16KB batches
+    linger_ms: 10             # Wait up to 10ms to batch messages
+    buffer_memory: 33554432   # 32MB buffer
+
+    # Maximum message size
+    max_request_size: 1048576  # 1MB (for plate images if embedded)
+
+    # Timeout settings
+    request_timeout_ms: 30000  # 30 seconds
+    delivery_timeout_ms: 120000  # 2 minutes
+
+# Authentication (if using SASL/SSL)
+# Uncomment and configure for production Kafka clusters
+# auth:
+#   security_protocol: "SASL_SSL"  # Options: PLAINTEXT, SSL, SASL_PLAINTEXT, SASL_SSL
+#   sasl_mechanism: "PLAIN"        # Options: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+#   sasl_username: "your-username"
+#   sasl_password: "your-password"
+#   ssl_ca_location: "/path/to/ca-cert.pem"
+#   ssl_cert_location: "/path/to/client-cert.pem"
+#   ssl_key_location: "/path/to/client-key.pem"
+
+# Monitoring and metrics
+monitoring:
+  # Enable metrics reporting
+  enable_metrics: true
+
+  # Metrics reporting interval (seconds)
+  metrics_interval: 60
+
+# Development/Testing mode
+development:
+  # Use mock publisher (no real Kafka connection)
+  use_mock: false
+
+  # Log all published events to console
+  verbose_logging: true

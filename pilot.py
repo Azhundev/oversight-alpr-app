@@ -24,6 +24,8 @@ from services.detector.detector_service import YOLOv11Detector
 from services.ocr.ocr_service import PaddleOCRService
 from services.tracker.bytetrack_service import ByteTrackService, Detection
 from shared.utils.tracking_utils import bbox_to_numpy, get_track_color, draw_track_id
+from services.event_processor.event_processor_service import EventProcessorService
+from services.event_processor.kafka_publisher import KafkaPublisher, MockKafkaPublisher
 
 
 class ALPRPilot:
@@ -128,11 +130,19 @@ class ALPRPilot:
         self.track_ocr_attempts = {}  # track_id -> number of OCR attempts
         self.track_attributes_cache = {}  # track_id -> {color, make, model}
         self.track_frame_count = {}  # track_id -> frame count
+        self.track_plate_detected = set()  # track_ids that have had plates detected
 
-        # OCR throttling parameters
-        self.ocr_min_track_frames = 2  # Reduced for faster gate response
-        self.ocr_min_confidence = 0.75  # Minimum confidence to accept OCR result
-        self.ocr_max_attempts = 5  # Maximum OCR attempts per track
+        # Best-shot selection for gate scenario
+        self.track_best_plate_quality = {}  # track_id -> best quality score
+        self.track_best_plate_crop = {}  # track_id -> best plate crop image
+        self.track_best_plate_bbox = {}  # track_id -> best plate bbox
+        self.track_best_plate_frame = {}  # track_id -> frame number of best shot
+
+        # OCR throttling parameters (gate scenario)
+        self.ocr_min_track_frames = 2  # Wait for stable track
+        self.ocr_min_confidence = 0.70  # Reasonable confidence (model needs retraining if too low)
+        self.ocr_max_confidence_target = 0.90  # Target high confidence
+        self.ocr_max_attempts = 20  # Reasonable attempts
 
         # Attribute inference parameters
         self.attr_min_confidence = 0.8  # Run attributes on high-confidence frames
@@ -144,9 +154,41 @@ class ALPRPilot:
         self.min_skip_with_vehicles = max(0, frame_skip - 1)  # Reduce skip when vehicles present (but still skip some)
         self.adaptive_skip_current = self.frame_skip  # Current adaptive skip value
 
+        # Frame quality filtering (skip blurry frames from motion video)
+        self.enable_frame_quality_filter = False  # Disabled - process all frames for testing
+        self.min_frame_sharpness = 80.0  # Lowered threshold (was 150)
+
         # Cached overlay data (for skipped frames)
         self.last_processing_time = 0.0
         self.last_num_detections = 0
+
+        # Initialize Event Processor
+        logger.info("Initializing Event Processor...")
+        self.event_processor = EventProcessorService(
+            site_id="DC1",  # TODO: Configure based on deployment
+            host_id="jetson-orin-nx",
+            min_confidence=0.70,
+            dedup_similarity_threshold=0.85,
+            dedup_time_window_seconds=300,
+        )
+
+        # Initialize Kafka Publisher
+        logger.info("Initializing Kafka Publisher...")
+        try:
+            self.kafka_publisher = KafkaPublisher(
+                bootstrap_servers="localhost:9092",
+                topic="alpr.plates.detected",
+                client_id="alpr-jetson-producer",
+                compression_type="gzip",
+                acks="all",
+            )
+            logger.success("✅ Kafka publisher connected")
+        except Exception as e:
+            logger.warning(f"⚠️  Kafka not available, using mock publisher: {e}")
+            self.kafka_publisher = MockKafkaPublisher(
+                bootstrap_servers="localhost:9092",
+                topic="alpr.plates.detected",
+            )
 
         logger.success("ALPR Pilot initialized successfully")
 
@@ -158,42 +200,299 @@ class ALPRPilot:
             writer.writerow(['Timestamp', 'Camera_ID', 'Track_ID', 'Plate_Text', 'Confidence', 'Frame_Number'])
         logger.info(f"Created plate reads CSV: {self.plate_csv_path}")
 
-    def _save_plate_read(self, camera_id: str, track_id: int, plate_text: str, confidence: float):
-        """Save a plate read to CSV file"""
+    def _calculate_plate_similarity(self, plate1: str, plate2: str) -> float:
+        """
+        Calculate similarity between two plate texts (Levenshtein distance)
+        Returns similarity ratio 0.0-1.0 (1.0 = identical)
+        """
+        if plate1 == plate2:
+            return 1.0
+
+        # Simple Levenshtein distance implementation
+        if len(plate1) < len(plate2):
+            plate1, plate2 = plate2, plate1
+
+        distances = range(len(plate2) + 1)
+        for i1, c1 in enumerate(plate1):
+            new_distances = [i1 + 1]
+            for i2, c2 in enumerate(plate2):
+                if c1 == c2:
+                    new_distances.append(distances[i2])
+                else:
+                    new_distances.append(1 + min((distances[i2], distances[i2 + 1], new_distances[-1])))
+            distances = new_distances
+
+        levenshtein_distance = distances[-1]
+        max_length = max(len(plate1), len(plate2))
+        similarity = 1.0 - (levenshtein_distance / max_length) if max_length > 0 else 0.0
+
+        return similarity
+
+    def _is_duplicate_plate(self, plate_text: str, track_id: int, similarity_threshold: float = 0.85) -> bool:
+        """
+        Check if this plate is a duplicate/near-duplicate of an already saved plate
+        Uses fuzzy matching to handle OCR errors (e.g., ABC123 vs ABC1Z3)
+
+        Args:
+            plate_text: Plate text to check
+            track_id: Track ID
+            similarity_threshold: Minimum similarity to consider duplicate (0.85 = 85% match)
+
+        Returns:
+            True if duplicate, False if unique
+        """
+        # Check against all saved plates for this track
+        if track_id in self.track_ocr_cache:
+            cached_plate = self.track_ocr_cache[track_id].text
+            similarity = self._calculate_plate_similarity(plate_text, cached_plate)
+
+            if similarity >= similarity_threshold:
+                logger.debug(f"Track {track_id}: Plate '{plate_text}' is {similarity:.2%} similar to cached '{cached_plate}' - skipping duplicate")
+                return True
+
+        return False
+
+    def _merge_tracks_by_plate(self):
+        """
+        Merge tracks that have identical or very similar plate reads
+        This catches track fragmentations that IoU-based merging misses
+        """
+        if len(self.track_ocr_cache) < 2:
+            return
+
+        # Group tracks by their plate text
+        plate_to_tracks = {}
+        for track_id, plate_detection in self.track_ocr_cache.items():
+            plate_text = plate_detection.text
+            if plate_text not in plate_to_tracks:
+                plate_to_tracks[plate_text] = []
+            plate_to_tracks[plate_text].append((track_id, plate_detection.confidence))
+
+        # Merge tracks with same plate (keep highest confidence)
+        for plate_text, track_list in plate_to_tracks.items():
+            if len(track_list) > 1:
+                # Sort by confidence (descending)
+                track_list.sort(key=lambda x: x[1], reverse=True)
+                keep_track_id = track_list[0][0]  # Keep highest confidence
+
+                # Merge others into this one
+                for merge_track_id, _ in track_list[1:]:
+                    logger.info(f"Merging track {merge_track_id} → {keep_track_id} (same plate: {plate_text})")
+
+                    # Transfer data from merged track to kept track
+                    # Keep the best quality crop
+                    if merge_track_id in self.track_best_plate_quality and keep_track_id in self.track_best_plate_quality:
+                        if self.track_best_plate_quality[merge_track_id] > self.track_best_plate_quality[keep_track_id]:
+                            self.track_best_plate_quality[keep_track_id] = self.track_best_plate_quality[merge_track_id]
+                            self.track_best_plate_crop[keep_track_id] = self.track_best_plate_crop[merge_track_id]
+                            self.track_best_plate_bbox[keep_track_id] = self.track_best_plate_bbox[merge_track_id]
+                            self.track_best_plate_frame[keep_track_id] = self.track_best_plate_frame[merge_track_id]
+
+                    # Remove merged track from cache
+                    if merge_track_id in self.track_ocr_cache:
+                        del self.track_ocr_cache[merge_track_id]
+                    if merge_track_id in self.track_ocr_attempts:
+                        del self.track_ocr_attempts[merge_track_id]
+                    if merge_track_id in self.track_frame_count:
+                        # Add frame counts
+                        self.track_frame_count[keep_track_id] = self.track_frame_count.get(keep_track_id, 0) + self.track_frame_count[merge_track_id]
+                        del self.track_frame_count[merge_track_id]
+
+    def _save_plate_read(self, camera_id: str, track_id: int, plate_text: str, confidence: float, skip_duplicate_check: bool = False):
+        """Save a plate read to CSV file (with deduplication) - DEPRECATED: Use _publish_plate_event instead"""
         try:
+            # Check for duplicates using fuzzy matching (skip if this is a new read)
+            if not skip_duplicate_check and self._is_duplicate_plate(plate_text, track_id):
+                return  # Skip duplicate
+
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             with open(self.plate_csv_path, 'a', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([timestamp, camera_id, track_id, plate_text, f"{confidence:.3f}", self.frame_count])
+            logger.info(f"✅ Saved unique plate: Track {track_id} = {plate_text} (conf: {confidence:.2f})")
         except Exception as e:
             logger.error(f"Failed to save plate read: {e}")
 
-    def _save_plate_crop(self, frame, plate_bbox, track_id: int, camera_id: str):
-        """Save cropped plate image to output/crops directory"""
+    def _publish_plate_event(self, camera_id: str, track_id: int, plate_detection, vehicle=None, vehicle_idx=None):
+        """
+        Process and publish plate event to Kafka (replaces _save_plate_read)
+
+        Args:
+            camera_id: Camera identifier
+            track_id: Track ID
+            plate_detection: PlateDetection object from OCR
+            vehicle: VehicleDetection object (optional)
+            vehicle_idx: Vehicle index for looking up attributes
+        """
         try:
-            # Extract plate region from frame
-            x1, y1, x2, y2 = map(int, [plate_bbox.x1, plate_bbox.y1, plate_bbox.x2, plate_bbox.y2])
+            # Get vehicle attributes
+            vehicle_type = vehicle.vehicle_type if vehicle else "unknown"
+            vehicle_color = vehicle.color if vehicle else None
+            vehicle_make = vehicle.make if vehicle else None
+            vehicle_model = vehicle.model if vehicle else None
 
-            # Ensure coordinates are within frame bounds
-            h, w = frame.shape[:2]
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(w, x2), min(h, y2)
+            # Get cached attributes if available
+            if track_id in self.track_attributes_cache:
+                attrs = self.track_attributes_cache[track_id]
+                vehicle_color = vehicle_color or attrs.get('color')
+                vehicle_make = vehicle_make or attrs.get('make')
+                vehicle_model = vehicle_model or attrs.get('model')
 
-            # Skip if invalid bbox
-            if x2 <= x1 or y2 <= y1:
+            # Get plate image path
+            plate_image_path = None
+            if track_id in self.track_best_plate_crop:
+                date_folder = datetime.now().strftime('%Y-%m-%d')
+                filename = f"{camera_id}_track{track_id}_frame{self.track_best_plate_frame.get(track_id, 0)}_q{self.track_best_plate_quality.get(track_id, 0):.2f}.jpg"
+                plate_image_path = str(self.crops_dir / date_folder / filename)
+
+            # Get quality score
+            quality_score = self.track_best_plate_quality.get(track_id, 0.0)
+
+            # Process event through EventProcessorService
+            event = self.event_processor.process_detection(
+                plate_text=plate_detection.text,
+                plate_confidence=plate_detection.confidence,
+                camera_id=camera_id,
+                track_id=track_id,
+                vehicle_type=vehicle_type,
+                vehicle_color=vehicle_color,
+                vehicle_make=vehicle_make,
+                vehicle_model=vehicle_model,
+                plate_image_path=plate_image_path,
+                region="US-FL",  # TODO: Configure based on deployment
+                roi=None,  # TODO: Add ROI detection
+                direction=None,  # TODO: Add direction detection
+                quality_score=quality_score,
+                frame_number=self.frame_count,
+            )
+
+            if event:
+                # Publish to Kafka
+                success = self.kafka_publisher.publish_event(event.to_dict())
+                if success:
+                    logger.success(
+                        f"📤 Published to Kafka: {event.plate['normalized_text']} "
+                        f"(track: {track_id}, event: {event.event_id})"
+                    )
+
+                    # Also save to CSV for backwards compatibility
+                    self._save_plate_read(camera_id, track_id, plate_detection.text, plate_detection.confidence, skip_duplicate_check=True)
+
+                    # Save best crop to disk
+                    if track_id in self.track_best_plate_crop:
+                        self._save_best_crop_to_disk(track_id, camera_id)
+                else:
+                    logger.error("Failed to publish event to Kafka")
+            else:
+                logger.debug("Event rejected by processor (duplicate or invalid)")
+
+        except Exception as e:
+            logger.error(f"Failed to publish plate event: {e}")
+
+    def _save_best_crop_to_disk(self, track_id: int, camera_id: str):
+        """
+        Save the best cached plate crop for a track to disk
+
+        Args:
+            track_id: Track identifier
+            camera_id: Camera identifier
+        """
+        try:
+            if track_id not in self.track_best_plate_crop:
+                logger.warning(f"No cached crop for track {track_id}")
                 return
 
-            plate_crop = frame[y1:y2, x1:x2]
+            plate_crop = self.track_best_plate_crop[track_id]
+            quality_score = self.track_best_plate_quality[track_id]
+            frame_number = self.track_best_plate_frame[track_id]
 
-            # Generate filename with timestamp and track ID
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-            filename = f"{camera_id}_track{track_id}_{timestamp}_{self.crop_counter:04d}.jpg"
-            filepath = self.crops_dir / filename
+            # Create date-based folder
+            date_folder = datetime.now().strftime('%Y-%m-%d')
+            date_crops_dir = self.crops_dir / date_folder
+            date_crops_dir.mkdir(exist_ok=True, parents=True)
+
+            # Generate filename with track ID, frame, and quality score
+            filename = f"{camera_id}_track{track_id}_frame{frame_number}_q{quality_score:.2f}.jpg"
+            filepath = date_crops_dir / filename
 
             # Save crop
             cv2.imwrite(str(filepath), plate_crop)
             self.crop_counter += 1
-            logger.debug(f"Saved plate crop: {filename}")
+            logger.success(f"💾 Saved plate crop: {date_folder}/{filename} (quality: {quality_score:.3f})")
+
+        except Exception as e:
+            logger.error(f"Failed to save best crop to disk: {e}")
+
+    def _save_plate_crop(self, frame, plate_bbox, track_id: int, camera_id: str, force_save: bool = False):
+        """
+        Save cropped plate image (best-shot selection for gate scenario)
+        Only saves if this is the best quality shot seen for this track
+
+        Args:
+            frame: Input frame
+            plate_bbox: Plate bounding box
+            track_id: Track identifier
+            camera_id: Camera identifier
+            force_save: Force save (used when track is ending)
+        """
+        try:
+            # Calculate quality score for this detection
+            quality_score = self.calculate_plate_quality(frame, plate_bbox)
+
+            # Check if this is the best shot for this track
+            current_best = self.track_best_plate_quality.get(track_id, 0.0)
+
+            if quality_score > current_best or force_save:
+                # Extract plate region from frame with padding for better OCR
+                x1, y1, x2, y2 = map(int, [plate_bbox.x1, plate_bbox.y1, plate_bbox.x2, plate_bbox.y2])
+
+                # Add 50% padding on all sides (balanced crop size)
+                # Enough context without wasting space on background
+                bbox_width = x2 - x1
+                bbox_height = y2 - y1
+                pad_x = int(bbox_width * 0.5)
+                pad_y = int(bbox_height * 0.5)
+
+                # Expand bbox with padding
+                x1 = x1 - pad_x
+                y1 = y1 - pad_y
+                x2 = x2 + pad_x
+                y2 = y2 + pad_y
+
+                # Ensure coordinates are within frame bounds
+                h, w = frame.shape[:2]
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(w, x2), min(h, y2)
+
+                # Skip if invalid bbox
+                if x2 <= x1 or y2 <= y1:
+                    return
+
+                plate_crop = frame[y1:y2, x1:x2]
+
+                # Cache this as the best shot for this track
+                self.track_best_plate_quality[track_id] = quality_score
+                self.track_best_plate_crop[track_id] = plate_crop.copy()
+                self.track_best_plate_bbox[track_id] = plate_bbox
+                self.track_best_plate_frame[track_id] = self.frame_count
+
+                logger.debug(f"Track {track_id}: New best plate quality {quality_score:.3f} (frame {self.frame_count})")
+
+                # Only save to disk when forced (track ending or high confidence reached)
+                if force_save:
+                    # Create date-based folder (e.g., output/crops/2025-11-25/)
+                    date_folder = datetime.now().strftime('%Y-%m-%d')
+                    date_crops_dir = self.crops_dir / date_folder
+                    date_crops_dir.mkdir(exist_ok=True)
+
+                    # Generate filename with track ID and best frame number
+                    filename = f"{camera_id}_track{track_id}_frame{self.track_best_plate_frame[track_id]}_q{quality_score:.2f}.jpg"
+                    filepath = date_crops_dir / filename
+
+                    # Save best crop for this track
+                    cv2.imwrite(str(filepath), plate_crop)
+                    self.crop_counter += 1
+                    logger.info(f"Saved BEST plate crop for track {track_id}: {date_folder}/{filename} (quality: {quality_score:.3f})")
 
         except Exception as e:
             logger.error(f"Failed to save plate crop: {e}")
@@ -215,12 +514,70 @@ class ALPRPilot:
 
         return intersection / union if union > 0 else 0.0
 
-    def should_run_ocr(self, track_id):
+    def _find_nearby_cached_plate(self, track_id, current_bbox, iou_threshold=0.3):
         """
-        Determine if OCR should be run for this track
+        Find if any nearby tracks (likely same vehicle) already have cached OCR results
+        This prevents redundant OCR on fragmented tracks
+
+        Args:
+            track_id: Current track ID to check
+            current_bbox: Current vehicle bounding box (BoundingBox object)
+            iou_threshold: Minimum IoU overlap to consider tracks as "nearby" (default: 0.3)
+
+        Returns:
+            PlateDetection object if nearby cached plate found, None otherwise
+        """
+        # Convert current bbox to numpy for IoU computation
+        current_bbox_np = np.array([current_bbox.x1, current_bbox.y1, current_bbox.x2, current_bbox.y2])
+
+        # Search through all tracks with cached OCR results
+        best_iou = 0.0
+        best_plate = None
+
+        for other_track_id, plate_detection in self.track_ocr_cache.items():
+            # Skip self
+            if other_track_id == track_id:
+                continue
+
+            # Get the bbox where this plate was detected (if available)
+            # We need to look up the current vehicle position for this track
+            # For now, we'll check against recently cached plate bboxes
+            if other_track_id in self.track_best_plate_bbox:
+                other_plate_bbox = self.track_best_plate_bbox[other_track_id]
+
+                # Estimate vehicle bbox from plate bbox (plate is typically in lower portion of vehicle)
+                # Rough heuristic: vehicle is ~4x height and ~2x width of plate
+                plate_height = other_plate_bbox.y2 - other_plate_bbox.y1
+                plate_width = other_plate_bbox.x2 - other_plate_bbox.x1
+
+                estimated_vehicle_x1 = other_plate_bbox.x1 - plate_width * 0.5
+                estimated_vehicle_y1 = other_plate_bbox.y1 - plate_height * 3.0  # Plate is near bottom
+                estimated_vehicle_x2 = other_plate_bbox.x2 + plate_width * 0.5
+                estimated_vehicle_y2 = other_plate_bbox.y2 + plate_height * 0.5
+
+                other_bbox_np = np.array([estimated_vehicle_x1, estimated_vehicle_y1,
+                                         estimated_vehicle_x2, estimated_vehicle_y2])
+
+                # Compute IoU between current vehicle and estimated other vehicle
+                iou = self._compute_iou_np(current_bbox_np, other_bbox_np)
+
+                if iou > best_iou and iou >= iou_threshold:
+                    best_iou = iou
+                    best_plate = plate_detection
+
+        if best_plate is not None:
+            logger.debug(f"Track {track_id}: Found nearby cached plate (IoU: {best_iou:.3f})")
+
+        return best_plate
+
+    def should_run_ocr(self, track_id, current_bbox=None):
+        """
+        Determine if OCR should be run for this track (gate scenario: continuous improvement)
+        Now includes spatial deduplication to prevent redundant OCR on fragmented tracks
 
         Args:
             track_id: Track identifier
+            current_bbox: Current bounding box (BoundingBox object) for spatial checking
 
         Returns:
             bool: True if OCR should run
@@ -229,17 +586,28 @@ class ALPRPilot:
         if self.track_frame_count.get(track_id, 0) < self.ocr_min_track_frames:
             return False
 
-        # Already have high-confidence OCR result for this track?
+        # Already reached maximum target confidence?
         if track_id in self.track_ocr_cache:
             cached_result = self.track_ocr_cache[track_id]
-            # If confidence is high enough, don't retry
-            if cached_result.confidence >= self.ocr_min_confidence:
+            # Only stop if we've reached the max target (0.95)
+            if cached_result.confidence >= self.ocr_max_confidence_target:
                 return False
 
         # Check if we've exceeded max attempts
         attempts = self.track_ocr_attempts.get(track_id, 0)
         if attempts >= self.ocr_max_attempts:
             return False
+
+        # PROACTIVE DEDUPLICATION: Check if nearby tracks already have cached plate reads
+        # This prevents redundant OCR on fragmented tracks (same car, multiple track IDs)
+        if current_bbox is not None:
+            nearby_plate = self._find_nearby_cached_plate(track_id, current_bbox)
+            if nearby_plate is not None:
+                # Found a nearby track with cached OCR - reuse it instead of running OCR again
+                logger.info(f"Track {track_id}: Reusing cached plate from nearby track (spatial deduplication)")
+                self.track_ocr_cache[track_id] = nearby_plate
+                self.track_ocr_attempts[track_id] = 0  # Mark as reused, not attempted
+                return False
 
         return True
 
@@ -288,6 +656,88 @@ class ALPRPilot:
         self.track_attributes_cache[track_id] = attributes
         logger.debug(f"Cached attributes for track {track_id}: {attributes}")
 
+    def calculate_plate_sharpness(self, frame, plate_bbox):
+        """
+        Calculate sharpness score for a plate detection
+
+        Args:
+            frame: Input frame
+            plate_bbox: Plate bounding box
+
+        Returns:
+            float: Sharpness score (Laplacian variance)
+        """
+        try:
+            # Extract plate region
+            x1, y1, x2, y2 = map(int, [plate_bbox.x1, plate_bbox.y1, plate_bbox.x2, plate_bbox.y2])
+            h, w = frame.shape[:2]
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
+
+            if x2 <= x1 or y2 <= y1:
+                return 0.0
+
+            plate_crop = frame[y1:y2, x1:x2]
+            gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
+            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+
+            return laplacian_var
+
+        except Exception as e:
+            logger.debug(f"Failed to calculate plate sharpness: {e}")
+            return 0.0
+
+    def calculate_plate_quality(self, frame, plate_bbox):
+        """
+        Calculate quality score for a plate detection (gate scenario: best-shot selection)
+
+        Args:
+            frame: Input frame
+            plate_bbox: Plate bounding box
+
+        Returns:
+            float: Quality score (higher is better)
+        """
+        try:
+            # Extract plate region
+            x1, y1, x2, y2 = map(int, [plate_bbox.x1, plate_bbox.y1, plate_bbox.x2, plate_bbox.y2])
+            h, w = frame.shape[:2]
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
+
+            if x2 <= x1 or y2 <= y1:
+                return 0.0
+
+            plate_crop = frame[y1:y2, x1:x2]
+
+            # 1. Size score (larger plates are generally better)
+            plate_area = (x2 - x1) * (y2 - y1)
+            size_score = min(plate_area / 8000.0, 1.0)  # Normalize to 0-1
+
+            # 2. Sharpness score (CRITICAL - Laplacian variance)
+            # Higher variance = sharper edges = better frame quality
+            gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
+            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+            # Adjusted threshold: good frames should be 200+, blurry frames are <150
+            sharpness_score = min(laplacian_var / 300.0, 1.0)  # Normalize to 0-1
+
+            # 3. Aspect ratio score (typical FL plates are ~2-2.5:1 ratio)
+            plate_width = x2 - x1
+            plate_height = y2 - y1
+            aspect_ratio = plate_width / plate_height if plate_height > 0 else 0
+            ideal_ratio = 2.3  # Florida plates
+            aspect_score = 1.0 - min(abs(aspect_ratio - ideal_ratio) / ideal_ratio, 1.0)
+
+            # Weighted combination - HEAVILY favor sharpness for motion video
+            # Sharpness is 70% of score - critical for selecting good frames
+            quality = (sharpness_score * 0.70) + (size_score * 0.20) + (aspect_score * 0.10)
+
+            return quality
+
+        except Exception as e:
+            logger.debug(f"Failed to calculate plate quality: {e}")
+            return 0.0
+
     def process_frame(self, frame, camera_id: str):
         """
         Process single frame through detection pipeline
@@ -315,8 +765,8 @@ class ALPRPilot:
         # Detect vehicles
         vehicles = self.detector.detect_vehicles(
             frame,
-            confidence_threshold=0.25,  # Lowered to detect more vehicles for gate control
-            nms_threshold=0.5
+            confidence_threshold=0.25,  # Standard threshold
+            nms_threshold=0.4  # Lower NMS = more aggressive suppression of overlapping boxes (was 0.5)
         )
 
         # Adaptive frame sampling: adjust skip rate based on vehicle presence
@@ -351,39 +801,42 @@ class ALPRPilot:
             # Update tracker
             active_tracks = self.tracker.update(detections)
 
-            # Map vehicle detections to track IDs
-            min_iou_threshold = 0.1  # Minimum IoU to consider a match
+            # Debug logging
+            if self.frame_count % 30 == 0:
+                logger.info(f"Frame {self.frame_count}: {len(vehicles)} detections → {len(active_tracks)} tracks, Unique: {len(self.unique_vehicles)}")
+
+            # Map vehicle detections to track IDs using IoU matching
+            # ByteTrack internally assigns tracks, but we need to match them back to our detections
             for idx, vehicle in enumerate(vehicles):
-                # Find matching track by IoU
-                best_iou = 0
-                best_track = None
                 vehicle_bbox_np = bbox_to_numpy(vehicle.bbox)
 
+                # Find best matching track by IoU
+                best_iou = 0.0
+                best_track_id = None
+
                 for track in active_tracks:
-                    # Simple IoU matching between detection and track
                     track_bbox = track.tlbr
                     iou = self._compute_iou_np(vehicle_bbox_np, track_bbox)
                     if iou > best_iou:
                         best_iou = iou
-                        best_track = track
+                        best_track_id = track.track_id
 
-                # Only assign if IoU is above threshold
-                if best_track and best_iou >= min_iou_threshold:
-                    track_id = best_track.track_id
-                    vehicle_tracks[idx] = track_id
+                # Assign track ID if we found a reasonable match
+                # Use 0.25 threshold - lenient enough to handle bbox variations in motion video
+                if best_track_id is not None and best_iou >= 0.25:
+                    vehicle_tracks[idx] = best_track_id
 
                     # Update track frame count
-                    if track_id not in self.track_frame_count:
-                        self.track_frame_count[track_id] = 0
-                    self.track_frame_count[track_id] += 1
+                    if best_track_id not in self.track_frame_count:
+                        self.track_frame_count[best_track_id] = 0
+                    self.track_frame_count[best_track_id] += 1
 
                     # Cache vehicle attributes on first high-confidence frame
-                    if self.should_cache_attributes(track_id, vehicle.confidence):
-                        self.cache_vehicle_attributes(track_id, vehicle)
+                    if self.should_cache_attributes(best_track_id, vehicle.confidence):
+                        self.cache_vehicle_attributes(best_track_id, vehicle)
                 else:
-                    # No matching track - log warning
-                    if len(active_tracks) > 0:
-                        logger.debug(f"Vehicle {idx} has no matching track (best IoU: {best_iou:.3f})")
+                    # No good match found - skip this vehicle for tracking
+                    logger.debug(f"Vehicle {idx}: No track match (best IoU: {best_iou:.3f})")
         else:
             # No tracking - assign sequential IDs
             for idx, vehicle in enumerate(vehicles):
@@ -395,12 +848,29 @@ class ALPRPilot:
         plates = self.detector.detect_plates(
             frame,
             vehicle_bboxes=vehicle_bboxes,
-            confidence_threshold=0.20,  # Lowered threshold for gate control
+            confidence_threshold=0.20,  # Standard threshold
             nms_threshold=0.4
         )
 
-        # Run OCR on detected plates (THROTTLED - once per stable track)
-        # SINGLE INFERENCE ONLY - for gate control we need immediate processing
+        # Track plates detected per track and update best-shot selection
+        if plates:
+            for vehicle_idx, plate_bboxes in plates.items():
+                track_id = vehicle_tracks.get(vehicle_idx)
+
+                if track_id is None:
+                    continue
+
+                # Track that this track has a plate detected
+                if track_id not in self.track_plate_detected:
+                    self.track_plate_detected.add(track_id)
+
+                # Update best plate crop for this track (always evaluate quality)
+                plate_bbox = plate_bboxes[0]  # Use first plate
+                # Don't force save yet - wait for better quality or OCR success
+                self._save_plate_crop(frame, plate_bbox, track_id, camera_id, force_save=False)
+
+        # Run OCR on detected plates (CONTINUOUS IMPROVEMENT - gate scenario)
+        # Keep trying until we reach max confidence target (0.95) or max attempts
         plate_texts = {}  # Map vehicle index to plate text
         ocr_runs_this_frame = 0
 
@@ -412,10 +882,24 @@ class ALPRPilot:
                 if track_id is None:
                     continue
 
-                # Check if we should run OCR for this track
-                if self.should_run_ocr(track_id):
+                # Get vehicle bbox for spatial deduplication check
+                vehicle_bbox = vehicles[vehicle_idx].bbox if vehicle_idx < len(vehicles) else None
+
+                # Check if we should run OCR for this track (includes spatial deduplication)
+                if self.should_run_ocr(track_id, current_bbox=vehicle_bbox):
                     # Use first plate only (assumes one plate per vehicle)
                     plate_bbox = plate_bboxes[0]
+
+                    # Frame quality check - skip blurry frames (motion video)
+                    if self.enable_frame_quality_filter:
+                        plate_quality = self.calculate_plate_quality(frame, plate_bbox)
+                        # Extract sharpness component (70% of quality score)
+                        plate_sharpness = self.calculate_plate_sharpness(frame, plate_bbox)
+
+                        if plate_sharpness < self.min_frame_sharpness:
+                            logger.debug(f"Track {track_id}: Skipping blurry frame (sharpness: {plate_sharpness:.1f} < {self.min_frame_sharpness})")
+                            continue
+
                     ocr_runs_this_frame += 1
 
                     # Track OCR attempts
@@ -423,7 +907,7 @@ class ALPRPilot:
                         self.track_ocr_attempts[track_id] = 0
                     self.track_ocr_attempts[track_id] += 1
 
-                    # SINGLE OCR - immediate processing for gate control
+                    # SINGLE OCR - continuous improvement for gate control
                     plate_detection = self.ocr.recognize_plate(
                         frame,
                         plate_bbox,
@@ -437,18 +921,35 @@ class ALPRPilot:
                                    plate_detection.confidence > self.track_ocr_cache[track_id].confidence)
 
                         if is_new_read or is_better:
+                            old_confidence = self.track_ocr_cache[track_id].confidence if track_id in self.track_ocr_cache else 0.0
                             self.track_ocr_cache[track_id] = plate_detection
 
-                            # Only count and log unique high-confidence reads
+                            # Only count unique high-confidence reads
                             if is_new_read:
                                 self.plate_count += 1
 
-                            conf_indicator = "HIGH" if plate_detection.confidence >= self.ocr_min_confidence else "LOW"
-                            logger.info(f"OCR Track {track_id} [{conf_indicator}]: {plate_detection.text} (conf: {plate_detection.confidence:.2f}, attempt: {self.track_ocr_attempts[track_id]})")
+                            # Log with improvement indicator
+                            if is_better:
+                                improvement = plate_detection.confidence - old_confidence
+                                conf_indicator = "HIGH" if plate_detection.confidence >= self.ocr_min_confidence else "IMPROVING"
+                                logger.info(f"OCR Track {track_id} [{conf_indicator}]: {plate_detection.text} (conf: {plate_detection.confidence:.2f} +{improvement:.2f}, attempt: {self.track_ocr_attempts[track_id]})")
+                            else:
+                                conf_indicator = "HIGH" if plate_detection.confidence >= self.ocr_min_confidence else "LOW"
+                                logger.info(f"OCR Track {track_id} [{conf_indicator}]: {plate_detection.text} (conf: {plate_detection.confidence:.2f}, attempt: {self.track_ocr_attempts[track_id]})")
 
-                            # Save to CSV only for high-confidence reads
-                            if plate_detection.confidence >= self.ocr_min_confidence:
-                                self._save_plate_read(camera_id, track_id, plate_detection.text, plate_detection.confidence)
+                            # Publish to Kafka and save once when reaching high confidence
+                            if plate_detection.confidence >= self.ocr_min_confidence and is_new_read:
+                                logger.debug(f"Attempting to publish plate: track={track_id}, text={plate_detection.text}, conf={plate_detection.confidence:.2f}")
+                                # Get vehicle object for metadata
+                                vehicle = vehicles[vehicle_idx] if vehicle_idx < len(vehicles) else None
+                                # Publish plate event to Kafka
+                                self._publish_plate_event(camera_id, track_id, plate_detection, vehicle=vehicle, vehicle_idx=vehicle_idx)
+
+                            # Also save if we reached max target confidence (even if already saved)
+                            elif plate_detection.confidence >= self.ocr_max_confidence_target:
+                                if track_id in self.track_best_plate_crop:
+                                    logger.success(f"Track {track_id}: Reached target confidence {plate_detection.confidence:.2f} - saving best crop!")
+                                    self._save_best_crop_to_disk(track_id, camera_id)
                     else:
                         logger.debug(f"OCR Track {track_id}: No text detected (attempt: {self.track_ocr_attempts[track_id]})")
 
@@ -460,6 +961,9 @@ class ALPRPilot:
                     if vehicle_idx not in plate_texts:
                         plate_texts[vehicle_idx] = []
                     plate_texts[vehicle_idx].append(self.track_ocr_cache[track_id])
+
+        # Merge tracks with identical plate reads (same vehicle, fragmented tracking)
+        self._merge_tracks_by_plate()
 
         # Update stats - count unique tracks only
         self.frame_count += 1
@@ -523,10 +1027,6 @@ class ALPRPilot:
                         plate_bbox.x1, plate_bbox.y1,
                         plate_bbox.x2, plate_bbox.y2
                     ])
-
-                    # Save plate crop
-                    track_id = vehicle_tracks.get(idx, -1)
-                    self._save_plate_crop(frame, plate_bbox, track_id, camera_id)
 
                     # Plate bbox (yellow)
                     cv2.rectangle(vis_frame, (px1, py1), (px2, py2), (0, 255, 255), 2)
@@ -596,7 +1096,7 @@ class ALPRPilot:
             f"Camera: {camera_id} | OCR: {ocr_status} | Tracking: {tracking_status} | {sampling_info}",
             f"FPS: {self.fps_smoothed:.1f} | Processing: {processing_time:.1f}ms",
             f"Detections: {num_detections} vehicles | Active Tracks: {active_tracks} | Cached OCR: {cached_ocr}",
-            f"Unique Vehicles: {len(self.unique_vehicles)} | Plates Read: {self.plate_count} | Uptime: {time.time() - self.start_time:.0f}s"
+            f"Unique Vehicles: {len(self.unique_vehicles)} | Plates Recognized: {self.plate_count} | Uptime: {time.time() - self.start_time:.0f}s"
         ]
 
         for idx, text in enumerate(texts):
@@ -681,6 +1181,13 @@ class ALPRPilot:
     def cleanup(self):
         """Cleanup resources"""
         logger.info("Cleaning up...")
+
+        # Flush and close Kafka publisher
+        if hasattr(self, 'kafka_publisher'):
+            logger.info("Flushing Kafka publisher...")
+            self.kafka_publisher.flush()
+            self.kafka_publisher.close()
+
         self.camera_manager.stop_all()
         if self.display:
             cv2.destroyAllWindows()
@@ -693,7 +1200,7 @@ class ALPRPilot:
             f"Pilot complete:\n"
             f"  Frames processed: {self.frame_count}\n"
             f"  Unique vehicles: {len(self.unique_vehicles)}\n"
-            f"  Plates read: {self.plate_count}\n"
+            f"  Plates recognized: {self.plate_count}\n"
             f"  Runtime: {elapsed:.1f}s\n"
             f"  Average FPS: {avg_fps:.2f}"
         )
@@ -711,8 +1218,8 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="yolo11n.pt",
-        help="YOLOv11 vehicle model path (default: yolo11n.pt)"
+        default="models/yolo11n.pt",
+        help="YOLOv11 vehicle model path (default: models/yolo11n.pt)"
     )
     parser.add_argument(
         "--plate-model",
