@@ -58,7 +58,7 @@ class CameraSource:
         self.is_running = False
         self.thread: Optional[Thread] = None
         self.stop_event = Event()
-        self.frame_queue: Queue = Queue(maxsize=buffer_size)
+        self.frame_queue: Queue = Queue(maxsize=max(buffer_size, 2))  # Minimum 2 for smoother playback
 
         # Stats
         self.frame_count = 0
@@ -219,6 +219,11 @@ class CameraSource:
                     except:
                         pass
 
+                # Small delay to prevent CPU spinning and allow processing to catch up
+                # For video files at 30fps, ~33ms per frame
+                if not self.source_uri.startswith("rtsp://") and self.target_fps:
+                    time.sleep(1.0 / self.target_fps * 0.5)  # Half speed to give processing time
+
             except Exception as e:
                 logger.error(f"Error in capture loop for {self.source_id}: {e}")
                 time.sleep(0.1)
@@ -235,9 +240,12 @@ class CameraSource:
             self.fps_frame_count = 0
             self.last_fps_update = time.time()
 
-    def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+    def read(self, get_latest: bool = True) -> Tuple[bool, Optional[np.ndarray]]:
         """
         Read next frame from queue
+
+        Args:
+            get_latest: If True, skip buffered frames and get the most recent one
 
         Returns:
             Tuple of (success, frame)
@@ -246,8 +254,25 @@ class CameraSource:
             return False, None
 
         try:
-            frame = self.frame_queue.get(timeout=1.0)
-            return True, frame
+            if get_latest:
+                # Flush queue and get latest frame to prevent buffering
+                frame = None
+                while not self.frame_queue.empty():
+                    try:
+                        frame = self.frame_queue.get_nowait()
+                    except:
+                        break
+
+                if frame is not None:
+                    return True, frame
+
+                # If queue was empty, wait for next frame
+                frame = self.frame_queue.get(timeout=0.1)
+                return True, frame
+            else:
+                # Get next frame in order (may be buffered)
+                frame = self.frame_queue.get(timeout=0.1)
+                return True, frame
         except:
             return False, None
 
@@ -321,6 +346,7 @@ class CameraManager:
                 location="Video File",
                 use_hw_decode=False,  # Video files don't need HW decode
                 loop_video=video_config.get('loop', True),  # Default to loop
+                target_fps=video_config.get('settings', {}).get('fps'),  # Control playback speed
             )
             self.cameras[video_config['id']] = camera
             logger.info(f"Loaded video source: {video_config['id']} - {video_config['name']}")

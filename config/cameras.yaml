@@ -44,7 +44,9 @@ onvif:
 # Video file sources (for testing)
 video_sources:
   - id: TEST-001
-    name: "Test Video - IMG_6931 (88MB)"
-    file_path: "videos/training/IMG_6931.MOV"
-    loop: false  # Don't loop - run through once
+    name: "Test Video - IMG_6941.MOV"
+    file_path: "videos/training/IMG_6941.MOV"
+    loop: true  # Loop video for continuous testing
     enabled: true
+    settings:
+      fps: 30  # Target 30fps for smooth playback
