@@ -1153,7 +1153,9 @@ class ALPRPilot:
 
                 # Handle keyboard input
                 if self.display:
-                    key = cv2.waitKey(1) & 0xFF
+                    # Use very short wait time to keep display responsive
+                    # This allows the display to update frequently even if processing is slow
+                    key = cv2.waitKey(10) & 0xFF
 
                     if key == ord('q'):
                         logger.info("Quit requested")

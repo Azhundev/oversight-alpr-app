@@ -48,12 +48,12 @@ class EventProcessorService:
 
     # US State plate format patterns (regex)
     # Format: {region: (pattern, description)}
-    # Florida plates: 3-4 letters followed by 2-4 numbers, or similar combinations (6-7 chars total)
+    # Accept any valid alphanumeric plate (4-8 characters) with at least one letter and one number
     PLATE_FORMATS = {
-        "US-FL": (r"^[A-Z]{2,4}[0-9]{2,4}$|^[0-9]{2,4}[A-Z]{2,4}$", "Florida standard (e.g., ABC123, 123ABC)"),
-        "US-CA": (r"^[0-9][A-Z]{3}[0-9]{3}$", "California standard (e.g., 1ABC234)"),
-        "US-TX": (r"^[A-Z]{3}[0-9]{4}$", "Texas standard (e.g., ABC1234)"),
-        "US-NY": (r"^[A-Z]{3}[0-9]{4}$", "New York standard (e.g., ABC1234)"),
+        "US-FL": (r"^(?=.*[A-Z])(?=.*[0-9])[A-Z0-9]{4,8}$", "US plate (4-8 chars, alphanumeric)"),
+        "US-CA": (r"^(?=.*[A-Z])(?=.*[0-9])[A-Z0-9]{4,8}$", "US plate (4-8 chars, alphanumeric)"),
+        "US-TX": (r"^(?=.*[A-Z])(?=.*[0-9])[A-Z0-9]{4,8}$", "US plate (4-8 chars, alphanumeric)"),
+        "US-NY": (r"^(?=.*[A-Z])(?=.*[0-9])[A-Z0-9]{4,8}$", "US plate (4-8 chars, alphanumeric)"),
         # Add more states/countries as needed
     }
 

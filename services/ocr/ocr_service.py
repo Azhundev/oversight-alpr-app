@@ -58,6 +58,8 @@ class PaddleOCRService:
         logger.info("Initializing PaddleOCR...")
         try:
             # Use minimal parameters for PaddleOCR 3.3.0
+            # Note: PaddleOCR's GPU support is limited and use_gpu parameter is often ignored
+            # FP16 precision parameter exists but has minimal impact since it runs on CPU
             self.ocr = PaddleOCR(lang='en')
             logger.success("PaddleOCR initialized successfully")
         except Exception as e:
