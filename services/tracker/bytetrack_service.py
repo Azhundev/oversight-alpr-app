@@ -43,58 +43,71 @@ class KalmanBoxTracker:
     """
     Kalman filter for tracking bounding boxes in image space.
 
-    State vector: [x_center, y_center, area, aspect_ratio, dx, dy, da, dr]
-    Observation: [x_center, y_center, area, aspect_ratio]
+    Uses a constant velocity model to predict object motion:
+    - State vector (8D): [x_center, y_center, area, aspect_ratio, dx, dy, da, dr]
+    - Measurement (4D): [x_center, y_center, area, aspect_ratio]
+
+    The Kalman filter fuses noisy measurements with motion predictions to:
+    1. Smooth bounding box trajectories
+    2. Handle temporary occlusions
+    3. Predict object positions between detections
     """
 
     def __init__(self, bbox: np.ndarray):
         """
-        Initialize Kalman filter with bounding box
+        Initialize Kalman filter with initial bounding box
 
         Args:
-            bbox: [x1, y1, x2, y2]
+            bbox: Initial bounding box [x1, y1, x2, y2]
         """
+        # 8D state space (position, size, velocities), 4D measurement space (position, size)
         self.kf = KalmanFilter(dim_x=8, dim_z=4)
 
-        # State transition matrix (constant velocity model)
+        # State transition matrix - constant velocity model
+        # New state = current state + velocity
         self.kf.F = np.array([
-            [1, 0, 0, 0, 1, 0, 0, 0],  # x = x + dx
-            [0, 1, 0, 0, 0, 1, 0, 0],  # y = y + dy
-            [0, 0, 1, 0, 0, 0, 1, 0],  # a = a + da
-            [0, 0, 0, 1, 0, 0, 0, 1],  # r = r + dr
-            [0, 0, 0, 0, 1, 0, 0, 0],  # dx = dx
-            [0, 0, 0, 0, 0, 1, 0, 0],  # dy = dy
-            [0, 0, 0, 0, 0, 0, 1, 0],  # da = da
-            [0, 0, 0, 0, 0, 0, 0, 1],  # dr = dr
+            [1, 0, 0, 0, 1, 0, 0, 0],  # x_new = x + dx (position + velocity)
+            [0, 1, 0, 0, 0, 1, 0, 0],  # y_new = y + dy
+            [0, 0, 1, 0, 0, 0, 1, 0],  # area_new = area + da
+            [0, 0, 0, 1, 0, 0, 0, 1],  # aspect_new = aspect + dr
+            [0, 0, 0, 0, 1, 0, 0, 0],  # dx_new = dx (velocity persists)
+            [0, 0, 0, 0, 0, 1, 0, 0],  # dy_new = dy
+            [0, 0, 0, 0, 0, 0, 1, 0],  # da_new = da
+            [0, 0, 0, 0, 0, 0, 0, 1],  # dr_new = dr
         ])
 
-        # Measurement matrix (observe position and size)
+        # Measurement matrix - we can only observe position and size (not velocity)
         self.kf.H = np.array([
-            [1, 0, 0, 0, 0, 0, 0, 0],  # measure x
-            [0, 1, 0, 0, 0, 0, 0, 0],  # measure y
-            [0, 0, 1, 0, 0, 0, 0, 0],  # measure a
-            [0, 0, 0, 1, 0, 0, 0, 0],  # measure r
+            [1, 0, 0, 0, 0, 0, 0, 0],  # measure x_center
+            [0, 1, 0, 0, 0, 0, 0, 0],  # measure y_center
+            [0, 0, 1, 0, 0, 0, 0, 0],  # measure area
+            [0, 0, 0, 1, 0, 0, 0, 0],  # measure aspect_ratio
         ])
 
-        # Measurement noise covariance - LOWER values = trust measurements MORE
-        self.kf.R[2:, 2:] *= 5.0  # Moderate uncertainty for area and aspect ratio (was 10.0)
+        # Measurement noise covariance - how much we trust detector measurements
+        # LOWER values = trust measurements MORE (less noise expected)
+        # Area and aspect ratio are less reliable than position
+        self.kf.R[2:, 2:] *= 5.0  # Moderate uncertainty for area and aspect ratio
 
-        # Process noise covariance - reflects belief in our model
-        self.kf.P[4:, 4:] *= 500.0  # Moderate uncertainty for velocities (was 1000.0)
-        self.kf.P *= 5.0  # Lower initial uncertainty (was 10.0)
+        # State covariance - initial uncertainty in state estimate
+        # Higher values = less confident in initial estimate
+        self.kf.P[4:, 4:] *= 500.0  # High uncertainty for unknown velocities
+        self.kf.P *= 5.0  # Moderate uncertainty for position/size
 
-        # Process noise - HIGHER values = expect more process variation
-        # For motion video with bbox jitter, we need higher process noise
-        self.kf.Q[-1, -1] *= 0.1  # Allow more aspect ratio change (was 0.01)
-        self.kf.Q[4:, 4:] *= 0.1  # Allow more velocity change (was 0.01)
+        # Process noise covariance - uncertainty in motion model
+        # HIGHER values = expect more random changes (less trust in constant velocity)
+        # Motion video has bbox jitter, so we allow more variation
+        self.kf.Q[-1, -1] *= 0.1  # Allow moderate aspect ratio changes (vehicle rotation)
+        self.kf.Q[4:, 4:] *= 0.1  # Allow moderate velocity changes (acceleration/deceleration)
 
-        # Initialize state with bbox
+        # Initialize state vector with first measurement
         self.kf.x[:4] = self._bbox_to_z(bbox)
 
-        self.time_since_update = 0
-        self.hits = 0
-        self.hit_streak = 0
-        self.age = 0
+        # Track statistics
+        self.time_since_update = 0  # Frames since last detection match
+        self.hits = 0  # Total number of detection matches
+        self.hit_streak = 0  # Consecutive detection matches
+        self.age = 0  # Total frames since creation
 
     def _bbox_to_z(self, bbox: np.ndarray) -> np.ndarray:
         """

@@ -205,23 +205,38 @@ class ALPRPilot:
         Calculate similarity between two plate texts (Levenshtein distance)
         Returns similarity ratio 0.0-1.0 (1.0 = identical)
         """
+        # Check for exact match first (optimization)
         if plate1 == plate2:
             return 1.0
 
-        # Simple Levenshtein distance implementation
+        # Levenshtein distance: minimum number of single-character edits needed
+        # to change one string into the other (insertions, deletions, substitutions)
+        # Swap to ensure plate1 is longer (optimization)
         if len(plate1) < len(plate2):
             plate1, plate2 = plate2, plate1
 
+        # Initialize distance array with column indices
         distances = range(len(plate2) + 1)
+
+        # Iterate through each character in plate1
         for i1, c1 in enumerate(plate1):
+            # Start new row with row index
             new_distances = [i1 + 1]
+
+            # Iterate through each character in plate2
             for i2, c2 in enumerate(plate2):
                 if c1 == c2:
+                    # Characters match, no edit needed
                     new_distances.append(distances[i2])
                 else:
+                    # Characters differ, take minimum cost of:
+                    # 1. Replace (distances[i2])
+                    # 2. Delete (distances[i2 + 1])
+                    # 3. Insert (new_distances[-1])
                     new_distances.append(1 + min((distances[i2], distances[i2 + 1], new_distances[-1])))
             distances = new_distances
 
+        # Convert edit distance to similarity ratio (0.0-1.0)
         levenshtein_distance = distances[-1]
         max_length = max(len(plate1), len(plate2))
         similarity = 1.0 - (levenshtein_distance / max_length) if max_length > 0 else 0.0
@@ -498,20 +513,30 @@ class ALPRPilot:
             logger.error(f"Failed to save plate crop: {e}")
 
     def _compute_iou_np(self, bbox1: np.ndarray, bbox2: np.ndarray) -> float:
-        """Compute IoU between two numpy bboxes [x1, y1, x2, y2]"""
-        x1_i = max(bbox1[0], bbox2[0])
-        y1_i = max(bbox1[1], bbox2[1])
-        x2_i = min(bbox1[2], bbox2[2])
-        y2_i = min(bbox1[3], bbox2[3])
+        """
+        Compute Intersection over Union (IoU) between two numpy bboxes [x1, y1, x2, y2]
+        IoU measures overlap between bounding boxes, used for matching detections to tracks
 
+        Returns:
+            float: IoU score between 0.0 (no overlap) and 1.0 (perfect overlap)
+        """
+        # Find intersection rectangle coordinates
+        x1_i = max(bbox1[0], bbox2[0])  # Leftmost edge of intersection
+        y1_i = max(bbox1[1], bbox2[1])  # Topmost edge of intersection
+        x2_i = min(bbox1[2], bbox2[2])  # Rightmost edge of intersection
+        y2_i = min(bbox1[3], bbox2[3])  # Bottommost edge of intersection
+
+        # Check if there's no overlap (invalid intersection)
         if x2_i < x1_i or y2_i < y1_i:
             return 0.0
 
+        # Calculate areas
         intersection = (x2_i - x1_i) * (y2_i - y1_i)
         area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
         area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
         union = area1 + area2 - intersection
 
+        # Return IoU ratio
         return intersection / union if union > 0 else 0.0
 
     def _find_nearby_cached_plate(self, track_id, current_bbox, iou_threshold=0.3):
@@ -691,45 +716,60 @@ class ALPRPilot:
         """
         Calculate quality score for a plate detection (gate scenario: best-shot selection)
 
+        Uses multiple factors to determine optimal plate capture for OCR:
+        - Sharpness (Laplacian variance) - most important for OCR accuracy
+        - Size (larger plates have more detail)
+        - Aspect ratio (validates proper plate detection)
+
         Args:
             frame: Input frame
             plate_bbox: Plate bounding box
 
         Returns:
-            float: Quality score (higher is better)
+            float: Quality score 0.0-1.0 (higher is better)
         """
         try:
-            # Extract plate region
+            # Extract plate region with bounds checking
             x1, y1, x2, y2 = map(int, [plate_bbox.x1, plate_bbox.y1, plate_bbox.x2, plate_bbox.y2])
             h, w = frame.shape[:2]
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w, x2), min(h, y2)
 
+            # Validate bbox
             if x2 <= x1 or y2 <= y1:
                 return 0.0
 
             plate_crop = frame[y1:y2, x1:x2]
 
-            # 1. Size score (larger plates are generally better)
+            # 1. Size score - larger plates capture more detail for OCR
+            #    Typical plate at optimal distance: ~8000 pixels area
             plate_area = (x2 - x1) * (y2 - y1)
-            size_score = min(plate_area / 8000.0, 1.0)  # Normalize to 0-1
+            size_score = min(plate_area / 8000.0, 1.0)  # Normalize to 0-1, cap at 1.0
 
-            # 2. Sharpness score (CRITICAL - Laplacian variance)
-            # Higher variance = sharper edges = better frame quality
+            # 2. Sharpness score (CRITICAL for OCR accuracy)
+            #    Uses Laplacian operator to detect edges - higher variance = sharper image
+            #    Motion blur significantly reduces OCR accuracy
             gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
             laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-            # Adjusted threshold: good frames should be 200+, blurry frames are <150
-            sharpness_score = min(laplacian_var / 300.0, 1.0)  # Normalize to 0-1
+            # Empirical thresholds from testing:
+            # - Good frames: 200+ variance
+            # - Blurry frames: <150 variance
+            # Normalize to 0-1 using 300 as reference maximum
+            sharpness_score = min(laplacian_var / 300.0, 1.0)
 
-            # 3. Aspect ratio score (typical FL plates are ~2-2.5:1 ratio)
+            # 3. Aspect ratio score - validates correct plate detection
+            #    Florida plates have standard 2.3:1 width:height ratio
             plate_width = x2 - x1
             plate_height = y2 - y1
             aspect_ratio = plate_width / plate_height if plate_height > 0 else 0
-            ideal_ratio = 2.3  # Florida plates
+            ideal_ratio = 2.3  # Florida standard license plate
+            # Penalize deviation from ideal ratio
             aspect_score = 1.0 - min(abs(aspect_ratio - ideal_ratio) / ideal_ratio, 1.0)
 
-            # Weighted combination - HEAVILY favor sharpness for motion video
-            # Sharpness is 70% of score - critical for selecting good frames
+            # Weighted combination optimized for motion video OCR
+            # Sharpness is 70% - critical for reading text in motion
+            # Size is 20% - helps with character recognition
+            # Aspect ratio is 10% - validates detection accuracy
             quality = (sharpness_score * 0.70) + (size_score * 0.20) + (aspect_score * 0.10)
 
             return quality
@@ -769,76 +809,85 @@ class ALPRPilot:
             nms_threshold=0.4  # Lower NMS = more aggressive suppression of overlapping boxes (was 0.5)
         )
 
-        # Adaptive frame sampling: adjust skip rate based on vehicle presence
+        # Adaptive frame sampling: dynamically adjust frame skip rate based on vehicle presence
+        # This optimizes performance by processing fewer frames when no vehicles are present
         if self.adaptive_sampling:
             if len(vehicles) > 0:
-                # Vehicles detected - process more frequently
+                # Vehicles detected - process more frequently to capture details
                 self.frames_since_last_detection = 0
                 self.adaptive_skip_current = self.min_skip_with_vehicles
             else:
-                # No vehicles - increase skip rate gradually
+                # No vehicles - increase skip rate gradually to save processing power
                 self.frames_since_last_detection += 1
-                if self.frames_since_last_detection > 30:  # After 30 frames (~1 sec) without vehicles
+                if self.frames_since_last_detection > 30:  # After 30 frames (~1 sec @ 30fps) without vehicles
+                    # Use maximum skip rate (process every 10th frame)
                     self.adaptive_skip_current = self.max_skip_no_vehicles
                 else:
-                    # Gradual transition to max skip
+                    # Gradual transition period - use baseline skip rate
                     self.adaptive_skip_current = self.frame_skip
 
-        # Update tracker with detections
+        # Update tracker with vehicle detections
+        # Maps vehicle detection index to persistent track ID for cross-frame association
         vehicle_tracks = {}  # vehicle_idx -> track_id
 
         if self.enable_tracking and self.tracker:
-            # Convert detections to tracker format
+            # Convert detections to ByteTrack format
             detections = []
             for vehicle in vehicles:
                 det = Detection(
-                    bbox=bbox_to_numpy(vehicle.bbox),
+                    bbox=bbox_to_numpy(vehicle.bbox),  # Convert to [x1, y1, x2, y2] numpy array
                     confidence=vehicle.confidence,
-                    class_id=0  # All vehicles for now
+                    class_id=0  # All vehicles treated as single class for now
                 )
                 detections.append(det)
 
-            # Update tracker
+            # Update tracker - associates detections with existing tracks or creates new ones
+            # ByteTrack uses Kalman filtering and IoU matching for robust tracking
             active_tracks = self.tracker.update(detections)
 
-            # Debug logging
+            # Periodic debug logging
             if self.frame_count % 30 == 0:
                 logger.info(f"Frame {self.frame_count}: {len(vehicles)} detections → {len(active_tracks)} tracks, Unique: {len(self.unique_vehicles)}")
 
             # Map vehicle detections to track IDs using IoU matching
             # ByteTrack internally assigns tracks, but we need to match them back to our detections
+            # This allows us to associate OCR results with specific vehicle detections
             for idx, vehicle in enumerate(vehicles):
                 vehicle_bbox_np = bbox_to_numpy(vehicle.bbox)
 
-                # Find best matching track by IoU
+                # Find best matching track by computing IoU with all active tracks
                 best_iou = 0.0
                 best_track_id = None
 
                 for track in active_tracks:
-                    track_bbox = track.tlbr
+                    track_bbox = track.tlbr  # Top-left, bottom-right format
                     iou = self._compute_iou_np(vehicle_bbox_np, track_bbox)
                     if iou > best_iou:
                         best_iou = iou
                         best_track_id = track.track_id
 
                 # Assign track ID if we found a reasonable match
-                # Use 0.25 threshold - lenient enough to handle bbox variations in motion video
+                # IoU threshold of 0.25 is lenient enough to handle:
+                # - Bbox variations between detector and tracker
+                # - Slight position changes in motion video
+                # - Partial occlusions
                 if best_track_id is not None and best_iou >= 0.25:
                     vehicle_tracks[idx] = best_track_id
 
-                    # Update track frame count
+                    # Increment frame count for this track (used for OCR throttling)
                     if best_track_id not in self.track_frame_count:
                         self.track_frame_count[best_track_id] = 0
                     self.track_frame_count[best_track_id] += 1
 
-                    # Cache vehicle attributes on first high-confidence frame
+                    # Cache vehicle attributes (color, make, model) on first high-confidence frame
+                    # Avoids running expensive attribute inference on every frame
                     if self.should_cache_attributes(best_track_id, vehicle.confidence):
                         self.cache_vehicle_attributes(best_track_id, vehicle)
                 else:
-                    # No good match found - skip this vehicle for tracking
+                    # No good match found - likely a false detection or tracking error
                     logger.debug(f"Vehicle {idx}: No track match (best IoU: {best_iou:.3f})")
         else:
-            # No tracking - assign sequential IDs
+            # Tracking disabled - assign sequential IDs (no cross-frame association)
             for idx, vehicle in enumerate(vehicles):
                 vehicle_tracks[idx] = idx
 

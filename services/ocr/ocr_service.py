@@ -77,66 +77,80 @@ class PaddleOCRService:
     def preprocess_plate_crop(self, plate_crop: np.ndarray) -> np.ndarray:
         """
         Preprocess license plate crop for better OCR accuracy
-        Special handling for Florida plates (orange logo removal)
+
+        Applies multiple image enhancement techniques:
+        1. Color removal (Florida plates have interfering orange logo)
+        2. Upscaling (for small/distant plates)
+        3. Denoising (removes sensor noise and compression artifacts)
+        4. Contrast enhancement (CLAHE - handles varying lighting)
+        5. Sharpening (counteracts motion blur)
 
         Args:
             plate_crop: Cropped plate image (BGR)
 
         Returns:
-            Preprocessed image
+            Preprocessed image optimized for OCR
         """
-        # Handle Florida plate orange logo interference
-        # The orange logo in the center is being misread as 'C'
+        # Special handling for Florida plates with orange logo
+        # The orange "Sunshine State" logo in the center is often misread as 'C' or 'O'
         if len(plate_crop.shape) == 3 and self.preprocess_config.get('remove_color', False):
-            # Convert to HSV to isolate orange regions
+            # Convert to HSV color space for better color segmentation
             hsv = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2HSV)
 
-            # Orange color range (Florida logo)
+            # Define orange color range for Florida plate logo
+            # Hue: 5-25 (orange), Saturation: 100-255, Value: 100-255
             lower_orange = np.array([5, 100, 100])
             upper_orange = np.array([25, 255, 255])
 
-            # Create mask for orange regions
+            # Create binary mask of orange regions
             orange_mask = cv2.inRange(hsv, lower_orange, upper_orange)
 
-            # Inpaint orange regions with surrounding colors (removes logo)
+            # Inpaint (fill in) orange regions with surrounding colors
+            # INPAINT_TELEA uses fast marching method - good for small regions
             plate_crop = cv2.inpaint(plate_crop, orange_mask, 3, cv2.INPAINT_TELEA)
 
-        # Convert to grayscale
+        # Convert to grayscale for processing
         if len(plate_crop.shape) == 3:
             gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
         else:
             gray = plate_crop
 
-        # Resize if too small
+        # Upscale small plates for better character recognition
+        # OCR accuracy drops significantly for plates < 32 pixels height
         min_height = self.preprocess_config.get('min_plate_height', 32)
         target_height = self.preprocess_config.get('target_height', 64)
 
         if gray.shape[0] < min_height:
-            # Calculate scale factor
+            # Calculate scaling factor to reach target height
             scale = target_height / gray.shape[0]
             new_width = int(gray.shape[1] * scale)
+            # INTER_CUBIC provides better quality for upscaling
             gray = cv2.resize(gray, (new_width, target_height),
                              interpolation=cv2.INTER_CUBIC)
 
-        # Denoise
+        # Non-local means denoising: removes noise while preserving edges
+        # Critical for video frames with compression artifacts
         if self.preprocess_config.get('denoise', True):
             gray = cv2.fastNlMeansDenoising(gray, None, h=10,
                                             templateWindowSize=7,
                                             searchWindowSize=21)
 
-        # Enhance contrast
+        # CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        # Enhances local contrast, handles uneven lighting and shadows
+        # Better than global histogram equalization for license plates
         if self.preprocess_config.get('enhance_contrast', True):
-            # CLAHE (Contrast Limited Adaptive Histogram Equalization)
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             gray = clahe.apply(gray)
 
-        # Sharpen for motion blur (important for blurry video)
+        # Unsharp masking to sharpen edges and counteract motion blur
+        # Important for video captured from moving vehicles
         if self.preprocess_config.get('sharpen', False):
-            # Unsharp mask for sharpening
+            # Create blurred version
             gaussian = cv2.GaussianBlur(gray, (0, 0), 2.0)
+            # Subtract blurred from original, weighted: original * 1.5 - blurred * 0.5
             gray = cv2.addWeighted(gray, 1.5, gaussian, -0.5, 0)
 
-        # Convert back to BGR for PaddleOCR
+        # Convert back to BGR - PaddleOCR expects 3-channel images
         preprocessed = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
         return preprocessed
@@ -149,26 +163,33 @@ class PaddleOCRService:
     ) -> Optional[PlateDetection]:
         """
         Recognize license plate text from bounding box
-        Uses multi-strategy approach: tries both raw and preprocessed
+
+        Uses multi-strategy approach to maximize accuracy:
+        - Strategy 1: Raw image (works best for high-quality captures)
+        - Strategy 2: Preprocessed (handles noise, blur, poor lighting)
+        - Strategy 3: Upscaled 2x (for small/distant plates)
+
+        Returns the result with highest confidence score.
 
         Args:
             frame: Full frame image (BGR)
             bbox: Plate bounding box
-            preprocess: Apply preprocessing (will try both strategies)
+            preprocess: Apply preprocessing (enables strategy 2)
 
         Returns:
-            PlateDetection object or None if recognition fails
+            PlateDetection object with best result, or None if all strategies fail
         """
         start_time = time.time()
 
-        # Extract plate crop
+        # Extract plate region from frame
         x1, y1, x2, y2 = map(int, [bbox.x1, bbox.y1, bbox.x2, bbox.y2])
 
-        # Ensure coordinates are within frame bounds
+        # Clamp coordinates to frame bounds (prevents index errors)
         h, w = frame.shape[:2]
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(w, x2), min(h, y2)
 
+        # Validate bounding box
         if x2 <= x1 or y2 <= y1:
             logger.warning(f"Invalid bbox coordinates: ({x1},{y1}) to ({x2},{y2})")
             return None
@@ -179,17 +200,22 @@ class PaddleOCRService:
             logger.warning("Empty plate crop")
             return None
 
-        # Multi-strategy OCR: try multiple approaches and pick best result
+        # Multi-strategy OCR: try multiple approaches and select best result
+        # This improves robustness across varying image quality conditions
         best_result = None
         best_confidence = 0.0
 
         # Strategy 1: Raw image (no preprocessing)
+        # Often works best for clean, high-quality images
+        # Avoids potential artifacts from preprocessing
         result_raw = self._run_ocr_on_crop(plate_crop.copy(), strategy="raw", bbox=bbox)
         if result_raw and result_raw.confidence > best_confidence:
             best_result = result_raw
             best_confidence = result_raw.confidence
 
-        # Strategy 2: With preprocessing (if enabled)
+        # Strategy 2: Preprocessed image
+        # Applies denoising, contrast enhancement, and sharpening
+        # Best for blurry, noisy, or poorly lit plates
         if preprocess:
             preprocessed = self.preprocess_plate_crop(plate_crop.copy())
             result_preprocessed = self._run_ocr_on_crop(preprocessed, strategy="preprocessed", bbox=bbox)
@@ -197,9 +223,11 @@ class PaddleOCRService:
                 best_result = result_preprocessed
                 best_confidence = result_preprocessed.confidence
 
-        # Strategy 3: Upscaled 2x (for small plates)
+        # Strategy 3: Upscaled 2x
+        # For small plates (< 80 pixels height) that are far from camera
+        # Provides more pixels for character recognition
         plate_h = y2 - y1
-        if plate_h < 80:  # Small plate, try upscaling
+        if plate_h < 80:  # Threshold for "small" plate
             upscaled = cv2.resize(plate_crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
             result_upscaled = self._run_ocr_on_crop(upscaled, strategy="upscaled", bbox=bbox)
             if result_upscaled and result_upscaled.confidence > best_confidence:

@@ -72,11 +72,19 @@ class YOLOv11Detector:
         logger.success("YOLOv11 detector initialized successfully")
 
     def _load_model(self, model_path: str) -> YOLO:
-        """Load and optimize YOLO model"""
+        """
+        Load and optimize YOLO model
 
-        # Check if TensorRT engine already exists
+        Optimizes model for Jetson using TensorRT:
+        - FP16: 2-3x faster than FP32, minimal accuracy loss
+        - INT8: 3-4x faster, requires calibration dataset
+
+        TensorRT engines are cached and reused across runs
+        """
+
+        # Check if TensorRT engine already exists (avoids re-export)
         if self.use_tensorrt and not model_path.endswith('.engine'):
-            # Look for existing .engine file
+            # Look for cached .engine file (same name as .pt model)
             engine_path = str(Path(model_path).with_suffix('.engine'))
 
             if Path(engine_path).exists():
@@ -86,46 +94,50 @@ class YOLOv11Detector:
             else:
                 logger.info(f"No existing TensorRT engine found, will create: {engine_path}")
 
-        # Load PyTorch model
+        # Load PyTorch model (.pt format)
         model = YOLO(model_path)
 
-        # Export to TensorRT if enabled (Jetson optimization)
+        # Export to TensorRT if enabled (Jetson-specific optimization)
+        # TensorRT significantly improves inference speed on Jetson hardware
         if self.use_tensorrt and not model_path.endswith('.engine'):
             try:
                 if self.int8:
                     logger.info("Exporting model to TensorRT with INT8 precision...")
-                    # Export with INT8 precision for maximum speed
+                    # INT8: Maximum speed but requires calibration data
+                    # Uses representative dataset to determine quantization parameters
                     engine_path = model.export(
                         format='engine',
                         int8=True,
                         device=self.device,
                         batch=self.batch_size,
-                        workspace=4,  # 4GB workspace for calibration
+                        workspace=4,  # 4GB workspace for INT8 calibration
                         data='calibration.yaml',  # Calibration dataset from training videos
-                        dynamic=False,  # Disable dynamic shapes for INT8
-                        imgsz=640,  # Fixed input size
+                        dynamic=False,  # Fixed input shapes for INT8 (required)
+                        imgsz=640,  # Fixed input size 640x640
                     )
                 else:
                     logger.info("Exporting model to TensorRT with FP16 precision...")
-                    # Export with FP16 precision for Jetson
+                    # FP16: Good balance of speed and accuracy for Jetson
+                    # Provides 2-3x speedup with minimal accuracy loss
                     engine_path = model.export(
                         format='engine',
-                        half=self.fp16,
+                        half=self.fp16,  # Enable FP16 precision
                         device=self.device,
                         batch=self.batch_size,
-                        workspace=2,  # 2GB workspace
+                        workspace=2,  # 2GB workspace for FP16 optimization
                     )
                 logger.success(f"TensorRT engine created: {engine_path}")
+                # Reload the optimized engine
                 model = YOLO(engine_path)
             except Exception as e:
                 logger.warning(f"TensorRT export failed: {e}. Using PyTorch model.")
 
-        # Move PyTorch model to device (TensorRT engines don't support .to())
+        # Move PyTorch model to GPU (TensorRT engines don't support .to())
         if not str(model_path).endswith('.engine'):
             try:
                 model.to(self.device)
             except:
-                pass  # TensorRT models don't support .to()
+                pass  # TensorRT models are already device-specific
 
         return model
 
@@ -230,28 +242,32 @@ class YOLOv11Detector:
                     BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2)
                 )
 
-        # Match plates to vehicles by overlap
+        # Associate detected plates with their respective vehicles
+        # Uses spatial matching based on plate center position
         plates = {}
         if vehicle_bboxes and all_plate_bboxes:
             for plate_bbox in all_plate_bboxes:
                 # Find which vehicle this plate belongs to
+                # Using center-point matching (faster than IoU for this use case)
                 best_iou = 0
                 best_vehicle_idx = None
 
                 for idx, vehicle_bbox in enumerate(vehicle_bboxes):
-                    # Check if plate center is inside vehicle bbox
+                    # Calculate plate center point
                     plate_cx = (plate_bbox.x1 + plate_bbox.x2) / 2
                     plate_cy = (plate_bbox.y1 + plate_bbox.y2) / 2
 
+                    # Check if plate center falls within vehicle bounding box
                     if (vehicle_bbox.x1 <= plate_cx <= vehicle_bbox.x2 and
                         vehicle_bbox.y1 <= plate_cy <= vehicle_bbox.y2):
                         # Plate center is inside vehicle - assign it
+                        # (Plates should always be within vehicle bbox)
                         if idx not in plates:
                             plates[idx] = []
                         plates[idx].append(plate_bbox)
                         break
         elif all_plate_bboxes:
-            # No vehicles provided - return all plates as index 0
+            # No vehicles provided - return all plates grouped under index 0
             plates[0] = all_plate_bboxes
 
         inference_time = (time.time() - start_time) * 1000
@@ -296,40 +312,53 @@ class YOLOv11Detector:
     ) -> List[BoundingBox]:
         """
         Find license plate candidates using contour detection
+
+        Fallback method when no custom YOLO plate detector is available.
+        Uses classical computer vision techniques:
+        1. Bilateral filtering - reduces noise while preserving edges
+        2. Canny edge detection - finds strong edges
+        3. Contour detection - identifies rectangular regions
+        4. Geometric filtering - validates plate-like shapes
         """
+        # Convert to grayscale for processing
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
-        # Bilateral filter to reduce noise while preserving edges
+        # Bilateral filter: reduces noise while preserving strong edges
+        # Critical for clean edge detection on license plates
         gray = cv2.bilateralFilter(gray, 11, 17, 17)
 
-        # Edge detection
+        # Canny edge detection: finds strong gradients (plate borders)
         edged = cv2.Canny(gray, 30, 200)
 
-        # Find contours
+        # Find contours in edge map
         contours, _ = cv2.findContours(edged, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
         candidates = []
 
         for contour in contours:
-            # Approximate contour
+            # Approximate contour to reduce number of points
             peri = cv2.arcLength(contour, True)
             approx = cv2.approxPolyDP(contour, 0.018 * peri, True)
 
-            # Get bounding rect
+            # Get bounding rectangle for this contour
             x, y, w, h = cv2.boundingRect(approx)
 
-            # Filter by aspect ratio (plates are typically 2:1 to 5.5:1)
-            aspect_ratio = w / float(h) if h > 0 else 0
+            # Calculate geometric properties
+            aspect_ratio = w / float(h) if h > 0 else 0  # Width to height ratio
             area = w * h
             roi_area = roi.shape[0] * roi.shape[1]
 
-            # Filter by size and aspect ratio (stricter criteria)
-            if (2.5 <= aspect_ratio <= 5.0 and  # Narrower aspect ratio range
-                w >= 80 and h >= 25 and  # Larger minimum size
-                area >= 2000 and  # Minimum area requirement
-                area <= roi_area * 0.15 and  # Max 15% of vehicle area
-                w <= roi.shape[1] * 0.8 and h <= roi.shape[0] * 0.4):
+            # Filter candidates using plate characteristics:
+            # - Aspect ratio: US plates are typically 2.5:1 to 5:1 (FL ~2.3:1)
+            # - Size: minimum dimensions to avoid noise
+            # - Area: reasonable proportion of vehicle ROI
+            if (2.5 <= aspect_ratio <= 5.0 and  # Plate-like aspect ratio
+                w >= 80 and h >= 25 and  # Minimum dimensions (pixels)
+                area >= 2000 and  # Minimum area to avoid small artifacts
+                area <= roi_area * 0.15 and  # Maximum 15% of vehicle bbox
+                w <= roi.shape[1] * 0.8 and h <= roi.shape[0] * 0.4):  # Reasonable relative size
 
+                # Convert ROI coordinates to frame coordinates
                 bbox = BoundingBox(
                     x1=offset_x + x,
                     y1=offset_y + y,

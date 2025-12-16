@@ -180,53 +180,64 @@ class CameraSource:
         logger.info(f"Camera {self.source_id} stopped")
 
     def _capture_loop(self):
-        """Background capture loop"""
+        """
+        Background capture loop - runs in separate thread
+        Continuously reads frames and adds them to queue for processing
+        """
         logger.info(f"Capture loop started for {self.source_id}")
 
         while self.is_running and not self.stop_event.is_set():
             try:
+                # Read next frame from capture device/file
                 ret, frame = self.cap.read()
 
                 if not ret:
-                    # For video files, check if we should loop
+                    # Handle end-of-stream based on source type
                     if not self.source_uri.startswith("rtsp://"):
+                        # Video file reached end
                         if self.loop_video:
+                            # Reset to beginning for continuous playback
                             logger.debug(f"Looping video: {self.source_id}")
                             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                             continue
                         else:
+                            # Stop playback when video ends
                             logger.info(f"Video ended: {self.source_id}")
                             break
                     else:
-                        # RTSP stream disconnected
+                        # RTSP stream disconnected or failed
                         logger.error(f"RTSP stream disconnected: {self.source_id}")
                         break
 
+                # Increment frame counter for statistics
                 self.frame_count += 1
 
-                # Update FPS calculation
+                # Update actual FPS calculation
                 self._update_fps()
 
-                # Add frame to queue (non-blocking)
+                # Add frame to queue (non-blocking to prevent thread from blocking)
                 try:
                     self.frame_queue.put_nowait(frame)
                 except Full:
-                    # Queue full, drop oldest frame
+                    # Queue is full - drop oldest frame and add new one
+                    # This implements a sliding window to reduce latency
                     try:
-                        self.frame_queue.get_nowait()
-                        self.frame_queue.put_nowait(frame)
+                        self.frame_queue.get_nowait()  # Remove oldest
+                        self.frame_queue.put_nowait(frame)  # Add newest
                         self.dropped_frames += 1
                     except:
                         pass
 
-                # Small delay to prevent CPU spinning and allow processing to catch up
+                # Rate limiting for video files to match playback speed
+                # Prevents reading entire video into memory instantly
                 # For video files at 30fps, ~33ms per frame
                 if not self.source_uri.startswith("rtsp://") and self.target_fps:
-                    time.sleep(1.0 / self.target_fps * 0.5)  # Half speed to give processing time
+                    # Use half speed (50% of frame time) to allow processing to keep up
+                    time.sleep(1.0 / self.target_fps * 0.5)
 
             except Exception as e:
                 logger.error(f"Error in capture loop for {self.source_id}: {e}")
-                time.sleep(0.1)
+                time.sleep(0.1)  # Brief pause before retry
 
         logger.info(f"Capture loop ended for {self.source_id}")
 
@@ -246,6 +257,7 @@ class CameraSource:
 
         Args:
             get_latest: If True, skip buffered frames and get the most recent one
+                       This reduces latency for real-time processing by discarding old frames
 
         Returns:
             Tuple of (success, frame)
@@ -255,10 +267,12 @@ class CameraSource:
 
         try:
             if get_latest:
-                # Flush queue and get latest frame to prevent buffering
+                # Flush queue and get latest frame to minimize latency
+                # Important for real-time ALPR - we want the freshest frame, not buffered ones
                 frame = None
                 while not self.frame_queue.empty():
                     try:
+                        # Discard all queued frames except the last one
                         frame = self.frame_queue.get_nowait()
                     except:
                         break
@@ -266,11 +280,12 @@ class CameraSource:
                 if frame is not None:
                     return True, frame
 
-                # If queue was empty, wait for next frame
+                # If queue was empty, wait briefly for next frame
                 frame = self.frame_queue.get(timeout=0.1)
                 return True, frame
             else:
-                # Get next frame in order (may be buffered)
+                # Get next frame in order (preserves temporal sequence)
+                # Used when frame order matters (e.g., video recording)
                 frame = self.frame_queue.get(timeout=0.1)
                 return True, frame
         except:
