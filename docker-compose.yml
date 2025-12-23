@@ -71,12 +71,92 @@ services:
       - alpr-network
     restart: unless-stopped
 
+  # TimescaleDB - PostgreSQL with time-series optimization
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: alpr-timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: alpr
+      POSTGRES_PASSWORD: alpr_secure_pass
+      POSTGRES_DB: alpr_db
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    networks:
+      - alpr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alpr -d alpr_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kafka Consumer - Consumes plate events and stores in TimescaleDB
+  kafka-consumer:
+    build:
+      context: .
+      dockerfile: services/storage/Dockerfile
+    container_name: alpr-kafka-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: alpr.plates.detected
+      KAFKA_GROUP_ID: alpr-storage-consumer
+      # Database configuration
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: alpr_db
+      DB_USER: alpr
+      DB_PASSWORD: alpr_secure_pass
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - alpr-network
+    restart: unless-stopped
+
+  # Query API - REST API for querying plate detection events
+  query-api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: alpr-query-api
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      # Database configuration
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: alpr_db
+      DB_USER: alpr
+      DB_PASSWORD: alpr_secure_pass
+    networks:
+      - alpr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
 volumes:
   zookeeper-data:
     driver: local
   zookeeper-logs:
     driver: local
   kafka-data:
+    driver: local
+  timescaledb-data:
     driver: local
 
 networks:

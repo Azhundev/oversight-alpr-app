@@ -156,7 +156,7 @@ class ALPRPilot:
 
         # Frame quality filtering (skip blurry frames from motion video)
         self.enable_frame_quality_filter = False  # Disabled - process all frames for testing
-        self.min_frame_sharpness = 80.0  # Lowered threshold (was 150)
+        self.min_frame_sharpness = 120.0  # Lowered threshold (was 150)
 
         # Cached overlay data (for skipped frames)
         self.last_processing_time = 0.0
