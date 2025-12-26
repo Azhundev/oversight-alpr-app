@@ -39,9 +39,9 @@ class KafkaStorageConsumer:
         db_name: str = "alpr_db",
         db_user: str = "alpr",
         db_password: str = "alpr_secure_pass",
-        auto_offset_reset: str = "latest",  # 'earliest' to replay all messages
-        enable_auto_commit: bool = True,
-        max_poll_records: int = 100,
+        auto_offset_reset: str = "latest",  # Where to start if no offset exists: 'latest' (only new messages) or 'earliest' (replay all from beginning)
+        enable_auto_commit: bool = True,  # Auto-commit offsets to prevent message reprocessing on restart (committed every 5s by default)
+        max_poll_records: int = 100,  # Maximum records fetched per poll (balance between throughput and memory usage)
     ):
         """
         Initialize Kafka consumer and storage service
@@ -72,14 +72,14 @@ class KafkaStorageConsumer:
         self.total_stored = 0
         self.failed_stores = 0
 
-        # Kafka configuration
+        # Kafka configuration for JSON message consumption
         self.kafka_config = {
-            'bootstrap_servers': kafka_bootstrap_servers.split(','),
-            'group_id': kafka_group_id,
-            'auto_offset_reset': auto_offset_reset,
-            'enable_auto_commit': enable_auto_commit,
-            'value_deserializer': lambda m: json.loads(m.decode('utf-8')),
-            'max_poll_records': max_poll_records,
+            'bootstrap_servers': kafka_bootstrap_servers.split(','),  # Split comma-separated broker list into array
+            'group_id': kafka_group_id,  # Consumer group for offset coordination across multiple consumers
+            'auto_offset_reset': auto_offset_reset,  # Offset reset policy when no committed offset exists
+            'enable_auto_commit': enable_auto_commit,  # Automatically commit offsets periodically (prevents duplicate processing)
+            'value_deserializer': lambda m: json.loads(m.decode('utf-8')),  # Deserialize JSON messages: bytes → UTF-8 string → dict
+            'max_poll_records': max_poll_records,  # Limit records per poll to control batch size and memory
         }
 
         # Database configuration
@@ -134,13 +134,14 @@ class KafkaStorageConsumer:
         logger.info(f"🚀 Starting Kafka consumer (topic: {self.topic})")
 
         try:
-            # Consume messages in a loop
+            # Consume messages in an infinite loop (blocking iterator)
+            # KafkaConsumer.poll() is called internally, fetching batches up to max_poll_records
             for message in self.consumer:
                 if not self.is_running:
                     break
 
                 try:
-                    # Deserialize event from Kafka message
+                    # Deserialize event from Kafka message (automatically deserialized by value_deserializer)
                     event_dict = message.value
                     self.total_consumed += 1
 
@@ -167,7 +168,7 @@ class KafkaStorageConsumer:
                         self.failed_stores += 1
                         logger.warning(f"Failed to store event: {event_id}")
 
-                    # Log stats periodically
+                    # Log stats periodically every 100 messages (balance between visibility and log volume)
                     if self.total_consumed % 100 == 0:
                         self._log_stats()
 
@@ -188,11 +189,12 @@ class KafkaStorageConsumer:
             self.stop()
 
     def stop(self):
-        """Stop consumer and close connections"""
+        """Stop consumer and close connections gracefully"""
         logger.info("Stopping Kafka consumer...")
         self.is_running = False
 
         if self.consumer:
+            # Close consumer (commits pending offsets if auto_commit enabled, leaves consumer group)
             self.consumer.close()
             logger.info("Kafka consumer closed")
 
@@ -235,11 +237,13 @@ class KafkaStorageConsumer:
 def main():
     """
     Main entry point for running consumer as standalone service
-    Reads configuration from environment variables with fallback to defaults
+
+    Reads configuration from environment variables with fallback to defaults.
+    This allows Docker containers to override settings without code changes.
     """
     logger.info("=== ALPR Kafka Storage Consumer ===")
 
-    # Read configuration from environment variables
+    # Read configuration from environment variables (with defaults for local development)
     kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     kafka_topic = os.getenv("KAFKA_TOPIC", "alpr.plates.detected")
     kafka_group_id = os.getenv("KAFKA_GROUP_ID", "alpr-storage-consumer")
