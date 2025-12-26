@@ -10,9 +10,17 @@ from loguru import logger
 
 
 def main():
-    """Main entrypoint - decide which consumer to use"""
+    """
+    Main entrypoint for Kafka consumer service
 
-    # Check if we should use Avro or JSON
+    Determines which consumer implementation to use based on USE_AVRO environment variable:
+    - If USE_AVRO=true: Uses Avro deserializer with Schema Registry
+    - Otherwise: Uses legacy JSON deserializer
+
+    Falls back to JSON consumer if Avro dependencies are not available.
+    """
+
+    # Parse USE_AVRO env var (default: false, case-insensitive)
     use_avro = os.getenv('USE_AVRO', 'false').lower() == 'true'
 
     logger.info("=" * 70)
@@ -27,6 +35,7 @@ def main():
             from avro_kafka_consumer import main as avro_main
             avro_main()
         except ImportError as e:
+            # Graceful degradation: if Avro dependencies missing, fall back to JSON consumer
             logger.error(f"Failed to import Avro consumer: {e}")
             logger.error("Make sure confluent-kafka[avro] is installed")
             logger.info("Falling back to JSON consumer...")

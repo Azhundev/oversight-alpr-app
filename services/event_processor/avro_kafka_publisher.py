@@ -74,10 +74,11 @@ class AvroKafkaPublisher:
         self.schema_str = self._load_schema(schema_file)
 
         # Create Avro serializer
+        # to_dict: Identity function since events are already dicts (obj=event dict, ctx=serialization context unused)
         self.avro_serializer = AvroSerializer(
             self.schema_registry_client,
             self.schema_str,
-            to_dict=lambda obj, ctx: obj  # Events are already dicts
+            to_dict=lambda obj, ctx: obj  # Events are already dicts, no transformation needed
         )
 
         # String serializer for keys
@@ -185,7 +186,7 @@ class AvroKafkaPublisher:
                 on_delivery=self._delivery_report
             )
 
-            # Trigger any available delivery callbacks
+            # Trigger any available delivery callbacks (non-blocking: timeout=0 for immediate return)
             self.producer.poll(0)
 
             return True
@@ -214,7 +215,7 @@ class AvroKafkaPublisher:
             if self.publish_event(event, topic=topic):
                 success_count += 1
 
-        # Trigger delivery for all pending messages
+        # Trigger delivery for all pending messages (100ms timeout balances batch efficiency and responsiveness)
         self.producer.poll(0.1)
 
         return success_count

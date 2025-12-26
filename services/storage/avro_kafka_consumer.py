@@ -85,9 +85,10 @@ class AvroKafkaConsumer:
         })
 
         # Create Avro deserializer
+        # from_dict: Identity function returns deserialized dict as-is (obj=deserialized dict, ctx=unused)
         self.avro_deserializer = AvroDeserializer(
             self.schema_registry_client,
-            from_dict=lambda obj, ctx: obj  # Events are already dicts
+            from_dict=lambda obj, ctx: obj  # Events are already dicts, no transformation needed
         )
 
         # String deserializer for keys
@@ -98,7 +99,7 @@ class AvroKafkaConsumer:
             'bootstrap.servers': kafka_bootstrap_servers,
             'group.id': kafka_group_id,
             'auto.offset.reset': auto_offset_reset,
-            'enable.auto.commit': True,
+            'enable.auto.commit': True,  # Auto-commit offsets to prevent message reprocessing on restart
             'key.deserializer': self.string_deserializer,
             'value.deserializer': self.avro_deserializer,
         }
@@ -153,7 +154,7 @@ class AvroKafkaConsumer:
 
             while self.running:
                 try:
-                    # Poll for messages (1 second timeout)
+                    # Poll for messages (1s timeout balances responsiveness and CPU usage)
                     msg = self.consumer.poll(timeout=1.0)
 
                     if msg is None:
@@ -197,7 +198,7 @@ class AvroKafkaConsumer:
                         self.stats['failed'] += 1
                         logger.error(f"❌ Failed to store event: {event_id}")
 
-                    # Log stats every 100 messages
+                    # Log stats every 100 messages (balance between visibility and log volume)
                     if self.stats['consumed'] % 100 == 0:
                         self._log_stats()
 

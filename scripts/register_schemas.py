@@ -20,6 +20,9 @@ SCHEMA_REGISTRY_URL = "http://localhost:8081"
 SCHEMAS_DIR = Path(__file__).parent.parent / "schemas"
 
 # Schema to subject mapping
+# Format: {schema_filename: subject_name}
+# Subject naming convention: {topic_name}-value (for value schemas)
+# Use {topic_name}-key for key schemas
 SCHEMA_MAPPINGS = {
     "plate_event.avsc": "alpr.plates.detected-value"
 }
@@ -57,7 +60,9 @@ def register_schema(schema_file: Path, subject: str) -> bool:
         # Convert schema to string (Schema Registry expects JSON string)
         schema_str = json.dumps(schema_json)
 
-        # Prepare request payload
+        # Prepare request payload (Schema Registry v1 format)
+        # schema: JSON string representation of Avro schema
+        # schemaType: Must be "AVRO", "JSON", or "PROTOBUF"
         payload = {
             "schema": schema_str,
             "schemaType": "AVRO"
@@ -72,11 +77,12 @@ def register_schema(schema_file: Path, subject: str) -> bool:
         )
 
         if response.status_code == 200:
+            # Successfully registered new schema version
             schema_id = response.json()['id']
             logger.success(f"✅ Registered schema: {subject} (ID: {schema_id})")
             return True
         elif response.status_code == 409:
-            # Schema already exists
+            # Schema already exists (identical schema previously registered - idempotent operation)
             logger.info(f"ℹ️  Schema already registered: {subject}")
             return True
         else:
@@ -105,7 +111,7 @@ def list_registered_schemas():
         if subjects:
             logger.info(f"\n📋 Registered schemas ({len(subjects)} total):")
             for subject in subjects:
-                # Get latest version info
+                # Fetch latest version metadata (includes version number and global schema ID)
                 version_response = requests.get(
                     f"{SCHEMA_REGISTRY_URL}/subjects/{subject}/versions/latest"
                 )

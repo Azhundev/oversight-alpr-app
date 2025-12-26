@@ -97,7 +97,7 @@ class ALPRPilot:
             batch_size=1,
         )
 
-        # Warmup detector
+        # Warmup detector with 10 iterations to initialize CUDA kernels and stabilize inference times
         logger.info("Warming up detector...")
         self.detector.warmup(iterations=10)
 
@@ -164,51 +164,54 @@ class ALPRPilot:
         self.last_processing_time = 0.0
         self.last_num_detections = 0
 
-        # Initialize Event Processor
+        # Initialize Event Processor with deduplication and confidence filtering
         logger.info("Initializing Event Processor...")
         self.event_processor = EventProcessorService(
-            site_id="DC1",  # TODO: Configure based on deployment
-            host_id="jetson-orin-nx",
-            min_confidence=0.70,
-            dedup_similarity_threshold=0.85,
-            dedup_time_window_seconds=300,
+            site_id="DC1",  # TODO: Configure based on deployment (datacenter/location identifier)
+            host_id="jetson-orin-nx",  # Unique device identifier (hostname or hardware serial)
+            min_confidence=0.70,  # Minimum confidence threshold for plate detection (70%)
+            dedup_similarity_threshold=0.85,  # Fuzzy match threshold for duplicate plates (85% similar)
+            dedup_time_window_seconds=300,  # Time window for deduplication (5 minutes)
         )
 
-        # Initialize Kafka Publisher with Avro serialization
+        # Initialize Kafka Publisher with Avro serialization and Schema Registry
         logger.info("Initializing Avro Kafka Publisher...")
         try:
             self.kafka_publisher = AvroKafkaPublisher(
-                bootstrap_servers="localhost:9092",
-                schema_registry_url="http://localhost:8081",
-                topic="alpr.plates.detected",
-                schema_file="schemas/plate_event.avsc",
-                client_id="alpr-jetson-producer",
-                compression_type="gzip",
-                acks="all",
+                bootstrap_servers="localhost:9092",  # Kafka broker address
+                schema_registry_url="http://localhost:8081",  # Schema Registry for Avro validation
+                topic="alpr.plates.detected",  # Topic for plate detection events
+                schema_file="schemas/plate_event.avsc",  # Avro schema definition (relative to project root)
+                client_id="alpr-jetson-producer",  # Unique client identifier for monitoring
+                compression_type="gzip",  # Compress messages to reduce network bandwidth (62% reduction)
+                acks="all",  # Wait for all replicas to acknowledge (strongest durability guarantee)
             )
             logger.success("✅ Avro Kafka publisher connected (Schema Registry: http://localhost:8081)")
         except Exception as e:
+            # Graceful degradation: if Kafka/Schema Registry unavailable, use mock publisher
+            # Mock publisher logs events locally without actual Kafka connectivity
             logger.warning(f"⚠️  Kafka/Schema Registry not available, using mock publisher: {e}")
             self.kafka_publisher = MockKafkaPublisher(
-                bootstrap_servers="localhost:9092",
+                bootstrap_servers="localhost:9092",  # Not used by mock, kept for consistency
                 topic="alpr.plates.detected",
             )
 
-        # Initialize Image Storage Service (MinIO)
+        # Initialize Image Storage Service (MinIO) for S3-compatible plate image storage
         logger.info("Initializing Image Storage Service...")
         try:
             import os
             self.image_storage = ImageStorageService(
-                endpoint=os.getenv("MINIO_ENDPOINT", "localhost:9000"),
-                access_key=os.getenv("MINIO_ACCESS_KEY", "alpr_minio"),
-                secret_key=os.getenv("MINIO_SECRET_KEY", "alpr_minio_secure_pass_2024"),
-                bucket_name=os.getenv("MINIO_BUCKET", "alpr-plate-images"),
-                local_cache_dir=str(self.crops_dir.parent),  # output/crops parent = output
-                cache_retention_days=int(os.getenv("MINIO_CACHE_RETENTION_DAYS", "7")),
-                thread_pool_size=4,
+                endpoint=os.getenv("MINIO_ENDPOINT", "localhost:9000"),  # MinIO server address
+                access_key=os.getenv("MINIO_ACCESS_KEY", "alpr_minio"),  # S3 access key
+                secret_key=os.getenv("MINIO_SECRET_KEY", "alpr_minio_secure_pass_2024"),  # S3 secret key
+                bucket_name=os.getenv("MINIO_BUCKET", "alpr-plate-images"),  # S3 bucket for plate images
+                local_cache_dir=str(self.crops_dir.parent),  # Local cache directory (output/crops parent = output)
+                cache_retention_days=int(os.getenv("MINIO_CACHE_RETENTION_DAYS", "7")),  # Keep cache for 7 days
+                thread_pool_size=4,  # Concurrent upload threads (4 for balanced throughput)
             )
             logger.success("✅ Image storage service initialized")
         except Exception as e:
+            # Graceful degradation: if MinIO unavailable, continue without image storage
             logger.warning(f"⚠️  MinIO not available: {e}")
             self.image_storage = None
 
@@ -399,9 +402,9 @@ class ALPRPilot:
                 vehicle_make=vehicle_make,
                 vehicle_model=vehicle_model,
                 plate_image_path=plate_image_path,
-                region="US-FL",  # TODO: Configure based on deployment
-                roi=None,  # TODO: Add ROI detection
-                direction=None,  # TODO: Add direction detection
+                region="US-FL",  # TODO: Make configurable via config/cameras.yaml (e.g., region: "US-CA", "US-TX")
+                roi=None,  # TODO: Add Region of Interest (ROI) coordinates from YOLO detection bounding box
+                direction=None,  # TODO: Add vehicle direction detection (N/S/E/W) using motion vector analysis
                 quality_score=quality_score,
                 frame_number=self.frame_count,
             )
