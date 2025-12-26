@@ -3,6 +3,9 @@
 # Database
 psycopg2-binary>=2.9.9  # PostgreSQL adapter
 
+# Object Storage (MinIO/S3)
+minio>=7.2.0            # MinIO client for presigned URLs
+
 # API Framework
 fastapi>=0.104.1        # Web framework
 uvicorn[standard]>=0.24.0  # ASGI server
@@ -10,3 +13,6 @@ pydantic>=2.5.0         # Data validation
 
 # Logging
 loguru>=0.7.2           # Logging library
+
+# Monitoring
+prometheus-fastapi-instrumentator>=6.1.0  # Prometheus metrics for FastAPI

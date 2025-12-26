@@ -14,6 +14,10 @@ from loguru import logger
 import uvicorn
 
 from services.storage.storage_service import StorageService
+from services.storage.image_storage_service import ImageStorageService
+
+# Prometheus metrics
+from prometheus_fastapi_instrumentator import Instrumentator
 
 
 # Initialize FastAPI app
@@ -32,8 +36,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global storage service instance
+# Add Prometheus metrics instrumentation
+# This automatically instruments all HTTP endpoints with metrics:
+# - http_requests_total (counter)
+# - http_request_duration_seconds (histogram)
+# - http_requests_in_progress (gauge)
+Instrumentator().instrument(app).expose(app)
+
+# Global storage service instances
 storage: Optional[StorageService] = None
+image_storage: Optional[ImageStorageService] = None
 
 
 # Response models
@@ -105,14 +117,85 @@ async def startup_event():
         logger.error(f"Failed to connect to database: {e}")
         raise
 
+    # Initialize MinIO client for presigned URLs
+    global image_storage
+    try:
+        minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+        minio_access_key = os.getenv("MINIO_ACCESS_KEY", "alpr_minio")
+        minio_secret_key = os.getenv("MINIO_SECRET_KEY", "alpr_minio_secure_pass_2024")
+        minio_bucket = os.getenv("MINIO_BUCKET", "alpr-plate-images")
+
+        image_storage = ImageStorageService(
+            endpoint=minio_endpoint,
+            access_key=minio_access_key,
+            secret_key=minio_secret_key,
+            bucket_name=minio_bucket,
+            local_cache_dir="",  # Not used for presigned URL generation
+            thread_pool_size=1,  # Minimal, only for presigned URLs
+        )
+        logger.success("✅ Query API connected to MinIO")
+    except Exception as e:
+        logger.warning(f"⚠️  MinIO not available: {e}")
+        image_storage = None
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close database connection on shutdown"""
-    global storage
+    global storage, image_storage
+
+    if image_storage:
+        image_storage.shutdown(wait=False, timeout=5)
+        logger.info("MinIO client shutdown")
+
     if storage:
         storage.close()
         logger.info("Database connection closed")
+
+
+# Helper functions
+def convert_s3_to_presigned(event: dict) -> dict:
+    """
+    Convert S3 URLs to presigned HTTP URLs for image access.
+
+    Args:
+        event: Event dictionary from database
+
+    Returns:
+        Event dict with S3 URLs converted to presigned HTTP URLs
+    """
+    if not image_storage:
+        return event
+
+    # Convert plate image URL
+    if event.get("plate_image_url") and event["plate_image_url"].startswith("s3://"):
+        presigned = image_storage.get_presigned_url(
+            event["plate_image_url"],
+            expiry_hours=1
+        )
+        if presigned:
+            event["plate_image_url"] = presigned
+            logger.debug(f"Generated presigned URL for plate image")
+
+    # Convert vehicle image URL (if implemented)
+    if event.get("vehicle_image_url") and event["vehicle_image_url"].startswith("s3://"):
+        presigned = image_storage.get_presigned_url(
+            event["vehicle_image_url"],
+            expiry_hours=1
+        )
+        if presigned:
+            event["vehicle_image_url"] = presigned
+
+    # Convert frame image URL (if implemented)
+    if event.get("frame_image_url") and event["frame_image_url"].startswith("s3://"):
+        presigned = image_storage.get_presigned_url(
+            event["frame_image_url"],
+            expiry_hours=1
+        )
+        if presigned:
+            event["frame_image_url"] = presigned
+
+    return event
 
 
 @app.get("/")
@@ -175,6 +258,10 @@ async def get_recent_events(
         raise HTTPException(status_code=503, detail="Database not initialized")
 
     events = storage.get_recent_events(limit=limit)
+
+    # Convert S3 URLs to presigned URLs
+    events = [convert_s3_to_presigned(e) for e in events]
+
     return {
         "count": len(events),
         "events": events
@@ -199,6 +286,9 @@ async def get_event_by_id(event_id: str):
 
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
+
+    # Convert S3 URLs to presigned URLs
+    event = convert_s3_to_presigned(event)
 
     return event
 
@@ -231,6 +321,9 @@ async def get_events_by_plate(
         limit=limit,
         offset=offset
     )
+
+    # Convert S3 URLs to presigned URLs
+    events = [convert_s3_to_presigned(e) for e in events]
 
     return {
         "plate": plate_text_normalized,
@@ -289,6 +382,9 @@ async def get_events_by_camera(
         offset=offset
     )
 
+    # Convert S3 URLs to presigned URLs
+    events = [convert_s3_to_presigned(e) for e in events]
+
     return {
         "camera_id": camera_id,
         "start_time": start_time,
@@ -338,6 +434,9 @@ async def search_events(
 
     # Apply additional filters in memory (inefficient but simple)
     # TODO: Implement proper SQL filtering in StorageService
+
+    # Convert S3 URLs to presigned URLs
+    events = [convert_s3_to_presigned(e) for e in events]
 
     return {
         "count": len(events),

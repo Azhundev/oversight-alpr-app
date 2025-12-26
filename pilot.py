@@ -29,9 +29,25 @@ from services.event_processor.kafka_publisher import KafkaPublisher, MockKafkaPu
 from services.event_processor.avro_kafka_publisher import AvroKafkaPublisher
 from services.storage.image_storage_service import ImageStorageService
 
+# Prometheus metrics
+from prometheus_client import Counter, Gauge, Histogram, start_http_server
+
 
 class ALPRPilot:
     """Simple pilot for testing ALPR pipeline"""
+
+    # Prometheus metrics (class-level for global access)
+    metrics_frames_processed = Counter('alpr_frames_processed_total', 'Total frames processed', ['camera_id'])
+    metrics_frames_skipped = Counter('alpr_frames_skipped_total', 'Total frames skipped', ['camera_id'])
+    metrics_vehicles_detected = Counter('alpr_vehicles_detected_total', 'Total vehicles detected', ['camera_id'])
+    metrics_plates_detected = Counter('alpr_plates_detected_total', 'Total plates detected', ['camera_id'])
+    metrics_ocr_operations = Counter('alpr_ocr_operations_total', 'Total OCR operations performed', ['camera_id'])
+    metrics_events_published = Counter('alpr_events_published_total', 'Total events published to Kafka', ['camera_id'])
+    metrics_fps = Gauge('alpr_fps', 'Current FPS', ['camera_id'])
+    metrics_processing_time = Histogram('alpr_processing_time_seconds', 'Frame processing time', ['camera_id'])
+    metrics_detection_time = Histogram('alpr_detection_time_seconds', 'Detection inference time', ['camera_id'])
+    metrics_ocr_time = Histogram('alpr_ocr_time_seconds', 'OCR processing time', ['camera_id'])
+    metrics_active_tracks = Gauge('alpr_active_tracks', 'Number of active tracked vehicles', ['camera_id'])
 
     def __init__(
         self,
@@ -214,6 +230,13 @@ class ALPRPilot:
             # Graceful degradation: if MinIO unavailable, continue without image storage
             logger.warning(f"⚠️  MinIO not available: {e}")
             self.image_storage = None
+
+        # Start Prometheus metrics HTTP server on port 8001
+        try:
+            start_http_server(8001)
+            logger.success("✅ Prometheus metrics endpoint started at http://localhost:8001/metrics")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to start Prometheus metrics server: {e}")
 
         logger.success("ALPR Pilot initialized successfully")
 
@@ -413,6 +436,9 @@ class ALPRPilot:
                 # Publish to Kafka
                 success = self.kafka_publisher.publish_event(event.to_dict())
                 if success:
+                    # Metrics: Record successful event publication
+                    self.metrics_events_published.labels(camera_id=camera_id).inc()
+
                     logger.success(
                         f"📤 Published to Kafka: {event.plate['normalized_text']} "
                         f"(track: {track_id}, event: {event.event_id})"
@@ -843,12 +869,15 @@ class ALPRPilot:
         if current_skip > 0 and self.frame_count % (current_skip + 1) != 0:
             # Skip processing, but still draw overlay for visual consistency
             self.frame_count += 1
+            # Metrics: Record skipped frame
+            self.metrics_frames_skipped.labels(camera_id=camera_id).inc()
             vis_frame = frame.copy()
             # Use cached values from last processed frame
             self._draw_overlay(vis_frame, camera_id, self.last_num_detections, self.last_processing_time)
             return vis_frame
 
         start_time = time.time()
+        detection_start = time.time()  # Track detection time separately
 
         # Detect vehicles
         vehicles = self.detector.detect_vehicles(
@@ -856,6 +885,11 @@ class ALPRPilot:
             confidence_threshold=0.25,  # Standard threshold
             nms_threshold=0.4  # Lower NMS = more aggressive suppression of overlapping boxes (was 0.5)
         )
+
+        # Metrics: Record detection time and vehicle count
+        detection_time = time.time() - detection_start
+        self.metrics_detection_time.labels(camera_id=camera_id).observe(detection_time)
+        self.metrics_vehicles_detected.labels(camera_id=camera_id).inc(len(vehicles))
 
         # Adaptive frame sampling: dynamically adjust frame skip rate based on vehicle presence
         # This optimizes performance by processing fewer frames when no vehicles are present
@@ -1005,11 +1039,18 @@ class ALPRPilot:
                     self.track_ocr_attempts[track_id] += 1
 
                     # SINGLE OCR - continuous improvement for gate control
+                    # Metrics: Time OCR operation
+                    ocr_start = time.time()
                     plate_detection = self.ocr.recognize_plate(
                         frame,
                         plate_bbox,
                         preprocess=True
                     )
+                    ocr_time = time.time() - ocr_start
+
+                    # Metrics: Record OCR operation and timing
+                    self.metrics_ocr_operations.labels(camera_id=camera_id).inc()
+                    self.metrics_ocr_time.labels(camera_id=camera_id).observe(ocr_time)
 
                     if plate_detection:
                         # Update cache (may overwrite low-confidence result with better one)
@@ -1076,6 +1117,25 @@ class ALPRPilot:
         processing_time = (time.time() - start_time) * 1000
         self.last_processing_time = processing_time
         self.last_num_detections = len(vehicles)
+
+        # Metrics: Record processing metrics
+        processing_time_seconds = processing_time / 1000.0
+        self.metrics_processing_time.labels(camera_id=camera_id).observe(processing_time_seconds)
+        self.metrics_frames_processed.labels(camera_id=camera_id).inc()
+
+        # Count plates detected in this frame
+        num_plates_this_frame = sum(len(plate_list) for plate_list in plates.values()) if plates else 0
+        self.metrics_plates_detected.labels(camera_id=camera_id).inc(num_plates_this_frame)
+
+        # Update active tracks gauge
+        self.metrics_active_tracks.labels(camera_id=camera_id).set(len(vehicle_tracks))
+
+        # Update FPS gauge (calculate smoothed FPS)
+        elapsed = time.time() - self.start_time
+        if elapsed > 0:
+            current_fps = self.frame_count / elapsed
+            self.fps_smoothed = (self.fps_alpha * current_fps) + ((1 - self.fps_alpha) * self.fps_smoothed)
+            self.metrics_fps.labels(camera_id=camera_id).set(self.fps_smoothed)
 
         # Visualize
         annotated_frame = self._visualize(

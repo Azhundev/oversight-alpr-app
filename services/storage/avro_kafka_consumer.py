@@ -6,6 +6,7 @@ Consumes PlateEvent messages from Kafka using Avro deserialization with Schema R
 
 import signal
 import sys
+import time
 from typing import Optional, Dict, Any
 from loguru import logger
 
@@ -21,6 +22,9 @@ except ImportError:
 
 from storage_service import StorageService
 
+# Prometheus metrics
+from prometheus_client import Counter, Histogram, Gauge, start_http_server
+
 
 class AvroKafkaConsumer:
     """
@@ -29,6 +33,15 @@ class AvroKafkaConsumer:
     Consumes Avro-serialized plate detection events from Kafka and stores them in TimescaleDB.
     Automatically deserializes using schemas from Schema Registry.
     """
+
+    # Prometheus metrics (class-level for global access)
+    metrics_consumed = Counter('kafka_consumer_messages_consumed_total', 'Total messages consumed from Kafka')
+    metrics_stored = Counter('kafka_consumer_messages_stored_total', 'Total messages stored in database')
+    metrics_failed = Counter('kafka_consumer_messages_failed_total', 'Total messages that failed to process')
+    metrics_skipped = Counter('kafka_consumer_messages_skipped_total', 'Total messages skipped (null/invalid)')
+    metrics_processing_time = Histogram('kafka_consumer_processing_time_seconds', 'Message processing time')
+    metrics_db_insert_time = Histogram('kafka_consumer_db_insert_time_seconds', 'Database insert time')
+    metrics_consumer_lag = Gauge('kafka_consumer_lag', 'Consumer lag (messages)')
 
     def __init__(
         self,
@@ -120,6 +133,13 @@ class AvroKafkaConsumer:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
+        # Start Prometheus metrics HTTP server on port 8002
+        try:
+            start_http_server(8002)
+            logger.success("✅ Prometheus metrics endpoint started at http://localhost:8002/metrics")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to start Prometheus metrics server: {e}")
+
     def _connect(self):
         """Establish connection to Kafka broker"""
         try:
@@ -164,13 +184,21 @@ class AvroKafkaConsumer:
                         logger.error(f"Consumer error: {msg.error()}")
                         continue
 
-                    # Message received - deserialize automatically by confluent-kafka
+                    # Message received - start timing
+                    processing_start = time.time()
+
+                    # Deserialize automatically by confluent-kafka
                     event_data = msg.value()
                     self.stats['consumed'] += 1
+
+                    # Metrics: Record consumed message
+                    self.metrics_consumed.inc()
 
                     if event_data is None:
                         logger.warning("Received null message, skipping")
                         self.stats['skipped'] += 1
+                        # Metrics: Record skipped message
+                        self.metrics_skipped.inc()
                         continue
 
                     # Log message details
@@ -185,18 +213,33 @@ class AvroKafkaConsumer:
                         f"camera={camera_id}"
                     )
 
-                    # Store in database
+                    # Store in database - time the operation
+                    db_insert_start = time.time()
                     success = self.storage.insert_event(event_data)
+                    db_insert_time = time.time() - db_insert_start
+
+                    # Metrics: Record DB insert time
+                    self.metrics_db_insert_time.observe(db_insert_time)
 
                     if success:
                         self.stats['stored'] += 1
+                        # Metrics: Record stored message
+                        self.metrics_stored.inc()
+
                         logger.info(
                             f"✅ Stored event: {plate_text} from {camera_id} "
                             f"(offset: {msg.offset()})"
                         )
                     else:
                         self.stats['failed'] += 1
+                        # Metrics: Record failed message
+                        self.metrics_failed.inc()
+
                         logger.error(f"❌ Failed to store event: {event_id}")
+
+                    # Metrics: Record total processing time
+                    processing_time = time.time() - processing_start
+                    self.metrics_processing_time.observe(processing_time)
 
                     # Log stats every 100 messages (balance between visibility and log volume)
                     if self.stats['consumed'] % 100 == 0:
@@ -209,6 +252,8 @@ class AvroKafkaConsumer:
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
                     self.stats['failed'] += 1
+                    # Metrics: Record failed message
+                    self.metrics_failed.inc()
                     continue
 
         except Exception as e:
