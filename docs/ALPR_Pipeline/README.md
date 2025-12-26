@@ -15,9 +15,9 @@ This guide covers deploying the OVR-ALPR (Overhead View Recognition - Automatic 
 
 ## System Overview
 
-OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Jetson platforms. The system uses a hybrid architecture:
+OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Jetson platforms with GPU hardware acceleration. The system uses a hybrid architecture:
 
-- **Edge Processing** (Jetson Device): Real-time camera ingestion, detection, OCR, and tracking
+- **Edge Processing** (Jetson Device): Real-time camera ingestion with GPU video decode, detection, OCR, and tracking
 - **Containerized Services** (Docker): Data storage, event streaming, and query API
 
 ### Key Components
@@ -26,50 +26,58 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
 |-----------|------|---------|
 | **pilot.py** | Python Application | Main ALPR pipeline (runs on host) |
 | **Kafka** | Docker Container | Event streaming platform |
+| **Schema Registry** | Docker Container | Avro schema management (Port 8081) |
 | **TimescaleDB** | Docker Container | Time-series database for events |
 | **Kafka Consumer** | Docker Container | Stores events from Kafka to DB |
 | **Query API** | Docker Container | REST API for querying events |
 | **Kafka UI** | Docker Container | Web interface for Kafka |
+| **MinIO** | Docker Container | S3-compatible object storage for images |
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────┐
-│       ALPR Pipeline (Host/Jetson)        │
-│  ┌────────┐  ┌──────────┐  ┌──────────┐  │
-│  │Camera  │→ │Detector  │→ │   OCR    │  │
-│  │Manager │  │(YOLOv11) │  │(Paddle)  │  │
-│  └────────┘  └──────────┘  └──────────┘  │
-│       ↓                                   │
-│  ┌──────────┐  ┌────────────────────┐    │
-│  │ Tracker  │→ │ Event Processor    │    │
-│  │(ByteTrack)  │ (Kafka Publisher)  │    │
-│  └──────────┘  └──────────┬─────────┘    │
-└────────────────────────────┼──────────────┘
-                             │ publishes events
+┌────────────────────────────────────────────┐
+│       ALPR Pipeline (Host/Jetson)          │
+│  ┌────────┐  ┌──────────┐  ┌──────────┐    │
+│  │Camera  │→ │Detector  │→ │   OCR    │    │
+│  │Manager │  │(YOLOv11) │  │(Paddle)  │    │
+│  └────────┘  └──────────┘  └──────────┘    │
+│       ↓                                     │
+│  ┌──────────┐  ┌──────────────────────┐    │
+│  │ Tracker  │→ │  Event Processor     │    │
+│  │(ByteTrack)  │ (Avro Publisher)     │    │
+│  └──────────┘  └──────────┬───────────┘    │
+└────────────────────────────┼────────────────┘
+                             │ publishes Avro events
                              ▼
-┌──────────────────────────────────────────┐
-│      Docker Infrastructure Services       │
-│  ┌─────────┐                              │
-│  │  Kafka  │ (Port 9092)                  │
-│  └────┬────┘                              │
-│       │                                   │
-│       ├──→ ┌─────────────────┐            │
-│       │    │ Kafka Consumer  │            │
-│       │    │   (Storage)     │            │
-│       │    └────────┬────────┘            │
-│       │             ▼                     │
-│       │    ┌──────────────────┐           │
-│       │    │   TimescaleDB    │           │
-│       │    │   (Port 5432)    │           │
-│       │    └────────┬─────────┘           │
-│       │             │                     │
-│       │             ▼                     │
-│       └──→ ┌──────────────────┐           │
-│            │    Query API     │           │
-│            │   (Port 8000)    │           │
-│            └──────────────────┘           │
-└──────────────────────────────────────────┘
+┌────────────────────────────────────────────┐
+│      Docker Infrastructure Services         │
+│  ┌─────────┐  ┌─────────────┐               │
+│  │  Kafka  │←→│   Schema    │               │
+│  │(Port    │  │  Registry   │               │
+│  │ 9092)   │  │ (Port 8081) │               │
+│  └────┬────┘  └─────────────┘               │
+│       │         ┌──────────────┐             │
+│       │         │    MinIO     │             │
+│       │         │ (Port 9000)  │             │
+│       │         │  S3 Storage  │             │
+│       │         └──────────────┘             │
+│       ├──→ ┌─────────────────┐               │
+│       │    │ Kafka Consumer  │               │
+│       │    │ (Avro→Storage)  │               │
+│       │    └────────┬────────┘               │
+│       │             ▼                        │
+│       │    ┌──────────────────┐              │
+│       │    │   TimescaleDB    │              │
+│       │    │   (Port 5432)    │              │
+│       │    └────────┬─────────┘              │
+│       │             │                        │
+│       │             ▼                        │
+│       └──→ ┌──────────────────┐              │
+│            │    Query API     │              │
+│            │   (Port 8000)    │              │
+│            └──────────────────┘              │
+└────────────────────────────────────────────┘
 ```
 
 ## Prerequisites
@@ -82,9 +90,10 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
 - USB Camera or IP Camera
 
 **Recommended** (Production):
-- NVIDIA Jetson Orin NX 16GB or AGX Orin
+- NVIDIA Jetson Orin NX 16GB or AGX Orin (supports 4-6 RTSP streams with GPU decode)
 - 128GB+ NVMe SSD
-- Industrial IP Camera with RTSP
+- Industrial IP Camera with RTSP (H.264/H.265)
+- Network bandwidth for multiple RTSP streams
 
 ### Software Requirements
 
@@ -100,6 +109,8 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
   - 5432 (TimescaleDB)
   - 8000 (Query API)
   - 8080 (Kafka UI)
+  - 9000 (MinIO API)
+  - 9001 (MinIO Console)
   - 9092 (Kafka)
   - RTSP camera streams (if using IP cameras)
 
@@ -173,6 +184,8 @@ python3 pilot.py --no-display --frame-skip 2
 - **Query API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 - **Kafka UI**: http://localhost:8080
+- **MinIO Console**: http://localhost:9001 (user: alpr_minio, password: alpr_minio_secure_pass_2024)
+- **MinIO API**: http://localhost:9000
 - **TimescaleDB**: localhost:5432 (user: alpr, db: alpr_db)
 
 ## Deployment Options
@@ -394,22 +407,27 @@ free -h
 
 Optimize performance on a single Jetson:
 
-1. **Increase frame skip**: Process fewer frames
+1. **Use RTSP streams with GPU decode**: Enables 4-6 concurrent streams (vs 1-2 with video files)
+   - Configure RTSP URLs in `config/cameras.yaml`
+   - GPU hardware decode (NVDEC) reduces CPU usage by 80-90%
+   - Supports H.264 and H.265 codecs
+
+2. **Increase frame skip**: Process fewer frames
    ```bash
    python3 pilot.py --frame-skip 3
    ```
 
-2. **Disable display**: Save GPU resources
+3. **Disable display**: Save GPU resources
    ```bash
    python3 pilot.py --no-display
    ```
 
-3. **Use TensorRT**: Optimize model inference
+4. **Use TensorRT**: Optimize model inference (already enabled by default)
    ```bash
    python3 pilot.py --use-tensorrt
    ```
 
-4. **Adjust batch size**: In detector configuration
+5. **Adjust batch size**: In detector configuration
 
 ### Horizontal Scaling (Multiple Devices)
 
@@ -420,13 +438,15 @@ Deploy across multiple Jetson devices:
    - Point all Jetson devices to central Kafka
 
 2. **Per-Camera Deployment**:
-   - Each Jetson handles 1-4 cameras
+   - Each Jetson handles 4-6 RTSP cameras (with GPU decode)
    - All publish to central Kafka
    - Centralized storage and API
 
 3. **Load Balancing**:
    - Use multiple Query API instances
    - Load balancer in front of APIs
+
+**Example:** 20 cameras = 4-5 Jetson devices with GPU decode (vs 10+ without)
 
 See [scaling.md](scaling.md) for detailed guide.
 

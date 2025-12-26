@@ -41,7 +41,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 ## System Summary
 
-**Total Services**: 10 core services + 4 infrastructure services
+**Total Services**: 12 core services + 6 infrastructure services
 
 **Edge Processing** (pilot.py):
 1. Camera Ingestion Service
@@ -50,18 +50,22 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 4. Tracker Service (ByteTrack)
 5. OCR Service (PaddleOCR)
 6. Event Processor Service
-7. Kafka Publisher Service
+7. Avro Kafka Publisher Service (with Schema Registry)
 
 **Backend Services** (Docker):
 8. Storage Service (Database abstraction)
-9. Kafka Consumer Service (Event persistence)
+9. Avro Kafka Consumer Service (Event persistence)
 10. Query API Service (REST API)
+11. Image Storage Service (MinIO uploads)
+12. Consumer Entrypoint Service (JSON/Avro router)
 
 **Infrastructure** (Docker):
 - Apache Kafka (message broker)
+- Confluent Schema Registry (Avro schema management)
 - ZooKeeper (Kafka coordination)
 - Kafka UI (web monitoring)
 - TimescaleDB (time-series database)
+- MinIO (S3-compatible object storage)
 
 **Key Features**:
 - Real-time plate detection and recognition
@@ -74,8 +78,8 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 **Technology Stack**:
 - **Edge**: Python 3.8+, PyTorch, TensorRT, PaddleOCR, OpenCV
-- **Messaging**: Apache Kafka 7.5.0, kafka-python
-- **Storage**: TimescaleDB (PostgreSQL 16 + TimescaleDB)
+- **Messaging**: Apache Kafka 7.5.0, Confluent Schema Registry 7.5.0, Avro
+- **Storage**: TimescaleDB (PostgreSQL 16 + TimescaleDB), MinIO (S3-compatible)
 - **API**: FastAPI, Uvicorn, Pydantic
 - **Deployment**: Docker Compose
 - **Hardware**: NVIDIA Jetson (Orin NX/AGX) with CUDA support
@@ -92,10 +96,16 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 **Key Features**:
 - Multi-threaded frame capture (one thread per camera)
-- Hardware-accelerated decoding for RTSP streams (GStreamer + nvv4l2decoder)
+- **GPU hardware-accelerated decoding (NVDEC) for RTSP streams via GStreamer** ✅
+- Software decoding for video files (CPU, for looping/seeking compatibility)
 - Frame buffering with queue management
 - Automatic video looping for test files
+- Codec auto-detection (H.264/H.265)
 - Frame drop detection and statistics
+
+**Performance (GPU Hardware Decode)**:
+- **RTSP streams:** 80-90% CPU reduction, 4-6 streams per Jetson Orin NX
+- **Video files:** CPU decode for compatibility, 1-2 streams per Jetson Orin NX
 
 **Configuration**: `config/cameras.yaml`
 
@@ -129,7 +139,10 @@ for camera_id, camera in manager.get_all_cameras().items():
 - Uses `buffer_size=2` (minimum) for smooth playback
 - `get_latest=True` flushes old frames to prevent lag
 - Target FPS control for video files (prevents buffering)
-- Hardware decoding for RTSP reduces CPU usage by 60-80%
+- **GPU hardware decoding for RTSP reduces CPU usage by 80-90%**
+- **RTSP capacity:** 4-6 concurrent streams per Jetson Orin NX (3x increase)
+- **Implementation:** OpenCV 4.6.0 with GStreamer 1.20.3 support
+- **See:** `docs/Optimizations/gpu-decode-implementation-complete.md`
 
 ---
 
@@ -888,6 +901,118 @@ curl http://localhost:8000/health
 
 ---
 
+### 11. Image Storage Service (MinIO)
+
+**Location**: `services/storage/image_storage_service.py`
+
+**Purpose**: Async upload of plate crop images to MinIO S3-compatible object storage
+
+**Key Features**:
+- S3-compatible object storage integration
+- Async background uploads using ThreadPoolExecutor (4 threads)
+- Local cache with automatic cleanup (configurable retention)
+- Upload retry logic with exponential backoff
+- Metadata tagging (camera_id, track_id, plate_text, quality_score)
+- Health monitoring and upload statistics
+- Graceful shutdown with pending upload completion
+
+**Main Class**: `ImageStorageService`
+
+**Configuration**:
+- MinIO Endpoint: `localhost:9000`
+- Access Key: `alpr_minio`
+- Bucket Name: `alpr-plate-images`
+- Upload Threads: 4
+- Cache Cleanup: 30 days retention
+
+**Methods**:
+- `upload_image_async(local_file_path, metadata)` → Queue image upload
+  - Returns: S3 URL (`s3://bucket/path/to/image.jpg`)
+  - Uploads in background thread
+  - Adds to upload queue
+  - Returns immediately (non-blocking)
+
+- `upload_image_sync(local_file_path, metadata)` → Upload and wait
+  - Returns: S3 URL or None on failure
+  - Blocking upload with retry logic
+  - Exponential backoff on failures
+
+- `get_stats()` → Upload statistics
+  - Returns: Total uploads, failures, queue size
+  - Thread pool status
+
+- `shutdown(wait=True, timeout=30)` → Graceful shutdown
+  - Waits for pending uploads to complete
+  - Stops upload threads
+  - Logs final statistics
+
+**Usage Example**:
+```python
+from services.storage.image_storage_service import ImageStorageService
+
+storage = ImageStorageService(
+    endpoint='localhost:9000',
+    access_key='alpr_minio',
+    secret_key='alpr_minio_secure_pass_2024',
+    bucket_name='alpr-plate-images',
+    local_cache_dir='output/crops',
+    max_workers=4
+)
+
+# Async upload (non-blocking)
+s3_url = storage.upload_image_async(
+    local_file_path='output/crops/2025-12-25/CAM1_track42_frame123_q0.85.jpg',
+    metadata={
+        'camera_id': 'CAM1',
+        'track_id': '42',
+        'plate_text': 'ABC1234',
+        'quality_score': '0.85',
+        'frame_number': '123'
+    }
+)
+
+print(f'Upload queued: {s3_url}')
+
+# Get statistics
+stats = storage.get_stats()
+print(f'Uploads: {stats["upload_count"]}, Failures: {stats["upload_failures"]}')
+
+# Cleanup
+storage.shutdown(wait=True, timeout=30)
+```
+
+**Integration with pilot.py**:
+- Integrated in `_save_best_crop_to_disk()` method
+- Uploads occur AFTER saving to local filesystem
+- S3 URLs stored in database `plate_image_url` field
+- Non-blocking background uploads prevent pipeline delays
+
+**Performance Notes**:
+- Upload latency: 100-500ms per image (depending on network)
+- Throughput: 10-20 uploads/second with 4 threads
+- Automatic retry on network failures
+- Local cache ensures data persistence even if MinIO is down
+
+**MinIO Configuration** (docker-compose.yml):
+```yaml
+minio:
+  image: minio/minio:latest
+  container_name: alpr-minio
+  ports:
+    - "9000:9000"  # API
+    - "9001:9001"  # Console
+  environment:
+    MINIO_ROOT_USER: alpr_minio
+    MINIO_ROOT_PASSWORD: alpr_minio_secure_pass_2024
+  command: server /data --console-address ":9001"
+  volumes:
+    - minio-data:/data
+```
+
+**Access MinIO Console**: http://localhost:9001
+
+---
+
 ## Infrastructure Services
 
 ### Kafka Ecosystem
@@ -914,6 +1039,23 @@ curl http://localhost:8000/health
 - Container: `alpr-kafka-ui`
 - Access: http://localhost:8080
 
+**Confluent Schema Registry** (`confluentinc/cp-schema-registry:7.5.0`)
+- Centralized schema management for Kafka
+- Port: 8081
+- Avro schema storage and validation
+- BACKWARD compatibility mode
+- Container: `alpr-schema-registry`
+- REST API: http://localhost:8081
+
+**Key Features**:
+- PlateEvent Avro schema (ID: 1, Version: 1)
+- Automatic schema validation on produce/consume
+- Schema evolution with compatibility checking
+- 62% message size reduction vs JSON
+- Integrated with Kafka producers/consumers
+- REST API for schema management
+- Health checks and monitoring
+
 ### Database
 
 **TimescaleDB** (`timescale/timescaledb:latest-pg16`)
@@ -933,6 +1075,27 @@ curl http://localhost:8000/health
 - Compression: Automatic compression of old chunks
 - Indexing: B-tree indexes for fast queries
 
+### Object Storage
+
+**MinIO** (`minio/minio:latest`)
+- S3-compatible object storage for plate crop images
+- Port: 9000 (API), 9001 (Console)
+- Bucket: `alpr-plate-images`
+- Automatic bucket initialization
+- Container: `alpr-minio`
+- Access Key: `alpr_minio`
+- Console: http://localhost:9001
+
+**Key Features**:
+- S3 API compatibility (works with boto3, minio-py, AWS SDK)
+- Web console for bucket management and browsing
+- Async image uploads from pilot.py
+- Metadata tagging support
+- Lifecycle policies for automatic cleanup (optional)
+- High-performance local storage
+- Docker volume persistence (`minio-data`)
+- Health checks and monitoring
+
 ### Docker Compose Stack
 
 **Network**: `alpr-network` (bridge)
@@ -942,14 +1105,18 @@ curl http://localhost:8000/health
 - `zookeeper-logs`: ZooKeeper logs
 - `kafka-data`: Kafka message logs
 - `timescaledb-data`: PostgreSQL database files
+- `minio-data`: MinIO object storage files
 
 **Startup Order**:
 1. ZooKeeper
 2. Kafka (depends on ZooKeeper)
-3. TimescaleDB
-4. Kafka Consumer (depends on Kafka + TimescaleDB)
-5. Query API (depends on TimescaleDB)
-6. Kafka UI (depends on Kafka)
+3. Schema Registry (depends on Kafka)
+4. TimescaleDB
+5. MinIO
+6. MinIO Init (depends on MinIO, creates buckets)
+7. Kafka Consumer (depends on Kafka + Schema Registry + TimescaleDB)
+8. Query API (depends on TimescaleDB)
+9. Kafka UI (depends on Kafka + Schema Registry)
 
 **Management Commands**:
 ```bash
@@ -1101,7 +1268,8 @@ python pilot.py --model models/yolo11n.pt --plate-model models/yolo11n-plate.pt
 
 | Service | CPU Time | GPU Time | Bottleneck |
 |---------|----------|----------|------------|
-| Camera Ingestion | <5ms | - | I/O |
+| Camera Ingestion (RTSP GPU) | <2ms | 3-5ms | I/O |
+| Camera Ingestion (Video CPU) | 10-15ms | - | I/O |
 | Vehicle Detection | 5-10ms | 10-15ms | GPU inference |
 | Plate Detection | 5-8ms | 5-10ms | GPU inference |
 | Tracking | <1ms | - | LAP solver |

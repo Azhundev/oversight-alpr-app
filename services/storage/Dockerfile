@@ -24,5 +24,5 @@ COPY shared/ ./shared/
 # Set Python path
 ENV PYTHONPATH=/app
 
-# Run the consumer
-CMD ["python", "-u", "services/storage/kafka_consumer.py"]
+# Run the consumer (entrypoint handles JSON vs Avro based on USE_AVRO env var)
+CMD ["python", "-u", "services/storage/consumer_entrypoint.py"]

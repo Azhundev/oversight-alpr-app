@@ -4,10 +4,16 @@
 # Database
 psycopg2-binary>=2.9.9  # PostgreSQL adapter
 
+# Object Storage (MinIO/S3)
+minio>=7.2.0            # MinIO client for S3-compatible storage
+
 # API
 fastapi>=0.104.1        # Web framework for query API
 uvicorn[standard]>=0.24.0  # ASGI server
 pydantic>=2.5.0         # Data validation
+
+# Kafka (Schema Registry support)
+confluent-kafka[avro]>=2.12.0  # Confluent Kafka with Avro serialization
 
 # Already required by main project:
 # kafka-python>=2.0.2   # Kafka client (already in main requirements)

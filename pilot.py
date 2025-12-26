@@ -26,6 +26,8 @@ from services.tracker.bytetrack_service import ByteTrackService, Detection
 from shared.utils.tracking_utils import bbox_to_numpy, get_track_color, draw_track_id
 from services.event_processor.event_processor_service import EventProcessorService
 from services.event_processor.kafka_publisher import KafkaPublisher, MockKafkaPublisher
+from services.event_processor.avro_kafka_publisher import AvroKafkaPublisher
+from services.storage.image_storage_service import ImageStorageService
 
 
 class ALPRPilot:
@@ -172,23 +174,43 @@ class ALPRPilot:
             dedup_time_window_seconds=300,
         )
 
-        # Initialize Kafka Publisher
-        logger.info("Initializing Kafka Publisher...")
+        # Initialize Kafka Publisher with Avro serialization
+        logger.info("Initializing Avro Kafka Publisher...")
         try:
-            self.kafka_publisher = KafkaPublisher(
+            self.kafka_publisher = AvroKafkaPublisher(
                 bootstrap_servers="localhost:9092",
+                schema_registry_url="http://localhost:8081",
                 topic="alpr.plates.detected",
+                schema_file="schemas/plate_event.avsc",
                 client_id="alpr-jetson-producer",
                 compression_type="gzip",
                 acks="all",
             )
-            logger.success("✅ Kafka publisher connected")
+            logger.success("✅ Avro Kafka publisher connected (Schema Registry: http://localhost:8081)")
         except Exception as e:
-            logger.warning(f"⚠️  Kafka not available, using mock publisher: {e}")
+            logger.warning(f"⚠️  Kafka/Schema Registry not available, using mock publisher: {e}")
             self.kafka_publisher = MockKafkaPublisher(
                 bootstrap_servers="localhost:9092",
                 topic="alpr.plates.detected",
             )
+
+        # Initialize Image Storage Service (MinIO)
+        logger.info("Initializing Image Storage Service...")
+        try:
+            import os
+            self.image_storage = ImageStorageService(
+                endpoint=os.getenv("MINIO_ENDPOINT", "localhost:9000"),
+                access_key=os.getenv("MINIO_ACCESS_KEY", "alpr_minio"),
+                secret_key=os.getenv("MINIO_SECRET_KEY", "alpr_minio_secure_pass_2024"),
+                bucket_name=os.getenv("MINIO_BUCKET", "alpr-plate-images"),
+                local_cache_dir=str(self.crops_dir.parent),  # output/crops parent = output
+                cache_retention_days=int(os.getenv("MINIO_CACHE_RETENTION_DAYS", "7")),
+                thread_pool_size=4,
+            )
+            logger.success("✅ Image storage service initialized")
+        except Exception as e:
+            logger.warning(f"⚠️  MinIO not available: {e}")
+            self.image_storage = None
 
         logger.success("ALPR Pilot initialized successfully")
 
@@ -353,12 +375,15 @@ class ALPRPilot:
                 vehicle_make = vehicle_make or attrs.get('make')
                 vehicle_model = vehicle_model or attrs.get('model')
 
-            # Get plate image path
+            # Generate plate image path (will be uploaded after saving to disk)
             plate_image_path = None
             if track_id in self.track_best_plate_crop:
                 date_folder = datetime.now().strftime('%Y-%m-%d')
                 filename = f"{camera_id}_track{track_id}_frame{self.track_best_plate_frame.get(track_id, 0)}_q{self.track_best_plate_quality.get(track_id, 0):.2f}.jpg"
-                plate_image_path = str(self.crops_dir / date_folder / filename)
+                local_image_path = str(self.crops_dir / date_folder / filename)
+
+                # Will be updated to S3 URL after upload (in _save_best_crop_to_disk)
+                plate_image_path = local_image_path
 
             # Get quality score
             quality_score = self.track_best_plate_quality.get(track_id, 0.0)
@@ -406,7 +431,7 @@ class ALPRPilot:
 
     def _save_best_crop_to_disk(self, track_id: int, camera_id: str):
         """
-        Save the best cached plate crop for a track to disk
+        Save the best cached plate crop for a track to disk and upload to MinIO
 
         Args:
             track_id: Track identifier
@@ -430,10 +455,30 @@ class ALPRPilot:
             filename = f"{camera_id}_track{track_id}_frame{frame_number}_q{quality_score:.2f}.jpg"
             filepath = date_crops_dir / filename
 
-            # Save crop
+            # Save crop to disk first
             cv2.imwrite(str(filepath), plate_crop)
             self.crop_counter += 1
             logger.success(f"💾 Saved plate crop: {date_folder}/{filename} (quality: {quality_score:.3f})")
+
+            # Upload to MinIO asynchronously (after file is saved)
+            if self.image_storage:
+                try:
+                    # Get plate text from cache if available
+                    plate_text = self.track_ocr_cache[track_id].text if track_id in self.track_ocr_cache else ""
+
+                    s3_url = self.image_storage.upload_image_async(
+                        local_file_path=str(filepath),
+                        metadata={
+                            "camera_id": camera_id,
+                            "track_id": str(track_id),
+                            "plate_text": plate_text,
+                            "quality_score": str(quality_score),
+                            "frame_number": str(frame_number),
+                        }
+                    )
+                    logger.success(f"☁️  Queued upload to MinIO: {filename} → {s3_url}")
+                except Exception as e:
+                    logger.error(f"MinIO upload failed: {e}")
 
         except Exception as e:
             logger.error(f"Failed to save best crop to disk: {e}")
@@ -1232,6 +1277,11 @@ class ALPRPilot:
     def cleanup(self):
         """Cleanup resources"""
         logger.info("Cleaning up...")
+
+        # Wait for pending image uploads
+        if hasattr(self, 'image_storage') and self.image_storage:
+            logger.info("Waiting for pending image uploads...")
+            self.image_storage.shutdown(wait=True, timeout=30)
 
         # Flush and close Kafka publisher
         if hasattr(self, 'kafka_publisher'):

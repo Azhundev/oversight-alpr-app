@@ -1,0 +1,184 @@
+{
+  "type": "record",
+  "name": "PlateEvent",
+  "namespace": "com.alpr.events",
+  "doc": "ALPR plate detection event with vehicle and metadata",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string",
+      "doc": "Unique event identifier (UUID)"
+    },
+    {
+      "name": "captured_at",
+      "type": "string",
+      "doc": "ISO 8601 timestamp when the plate was captured"
+    },
+    {
+      "name": "camera_id",
+      "type": "string",
+      "doc": "Camera identifier"
+    },
+    {
+      "name": "track_id",
+      "type": "string",
+      "doc": "Vehicle track identifier"
+    },
+    {
+      "name": "plate",
+      "type": {
+        "type": "record",
+        "name": "Plate",
+        "fields": [
+          {
+            "name": "text",
+            "type": "string",
+            "doc": "Raw OCR text"
+          },
+          {
+            "name": "normalized_text",
+            "type": "string",
+            "doc": "Normalized plate text (uppercase, alphanumeric)"
+          },
+          {
+            "name": "confidence",
+            "type": "float",
+            "doc": "OCR confidence score (0.0-1.0)"
+          },
+          {
+            "name": "region",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Plate region (e.g., US-FL)"
+          }
+        ]
+      },
+      "doc": "License plate information"
+    },
+    {
+      "name": "vehicle",
+      "type": {
+        "type": "record",
+        "name": "Vehicle",
+        "fields": [
+          {
+            "name": "type",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Vehicle type (car, truck, bus, motorcycle)"
+          },
+          {
+            "name": "make",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Vehicle make"
+          },
+          {
+            "name": "model",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Vehicle model"
+          },
+          {
+            "name": "color",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Vehicle color"
+          }
+        ]
+      },
+      "doc": "Vehicle information"
+    },
+    {
+      "name": "images",
+      "type": {
+        "type": "record",
+        "name": "Images",
+        "fields": [
+          {
+            "name": "plate_url",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "URL/path to plate crop image"
+          },
+          {
+            "name": "vehicle_url",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "URL/path to vehicle crop image"
+          },
+          {
+            "name": "frame_url",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "URL/path to full frame image"
+          }
+        ]
+      },
+      "doc": "Image URLs"
+    },
+    {
+      "name": "latency_ms",
+      "type": "int",
+      "default": 0,
+      "doc": "Processing latency in milliseconds"
+    },
+    {
+      "name": "node",
+      "type": {
+        "type": "record",
+        "name": "Node",
+        "fields": [
+          {
+            "name": "site",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Site identifier"
+          },
+          {
+            "name": "host",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Host identifier"
+          }
+        ]
+      },
+      "doc": "Processing node information"
+    },
+    {
+      "name": "extras",
+      "type": ["null", {
+        "type": "record",
+        "name": "Extras",
+        "fields": [
+          {
+            "name": "roi",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Region of interest"
+          },
+          {
+            "name": "direction",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Vehicle direction"
+          },
+          {
+            "name": "quality_score",
+            "type": ["null", "float"],
+            "default": null,
+            "doc": "Image quality score"
+          },
+          {
+            "name": "frame_number",
+            "type": ["null", "int"],
+            "default": null,
+            "doc": "Frame number from video"
+          }
+        ]
+      }],
+      "default": null,
+      "doc": "Additional metadata"
+    }
+  ]
+}
