@@ -32,6 +32,11 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
 | **Query API** | Docker Container | REST API for querying events |
 | **Kafka UI** | Docker Container | Web interface for Kafka |
 | **MinIO** | Docker Container | S3-compatible object storage for images |
+| **Prometheus** | Docker Container | Metrics collection and storage |
+| **Grafana** | Docker Container | Metrics visualization dashboards |
+| **Loki** | Docker Container | Log aggregation system |
+| **Promtail** | Docker Container | Log shipping agent |
+| **cAdvisor** | Docker Container | Container resource metrics |
 
 ## Architecture
 
@@ -319,6 +324,27 @@ Key options:
 
 ## Monitoring
 
+### Observability Stack
+
+The system includes a complete monitoring stack for production deployments:
+
+**Grafana Dashboards** (http://localhost:3000):
+- **ALPR Overview** - Real-time FPS, detections, latency metrics
+- **System Performance** - CPU, RAM, network usage per container
+- **Kafka & Database** - Message consumption, DB writes, API performance
+- **Logs Explorer** - Centralized log search and filtering
+
+**Access**:
+- URL: http://localhost:3000
+- Login: `admin` / `alpr_admin_2024`
+
+**Key Metrics**:
+- Current FPS and processing latency
+- Plates detected (last minute and total)
+- Kafka publish/consume rates
+- Database write performance
+- Container resource usage
+
 ### Service Health
 
 Check Docker service status:
@@ -333,6 +359,9 @@ docker compose logs -f kafka-consumer
 
 # Resource usage
 docker stats
+
+# Monitoring stack logs
+docker compose logs -f prometheus grafana loki
 ```
 
 ### API Health Checks
@@ -343,6 +372,11 @@ curl http://localhost:8000/health
 
 # Database statistics
 curl http://localhost:8000/stats
+
+# Prometheus metrics
+curl http://localhost:8001/metrics  # pilot.py
+curl http://localhost:8000/metrics  # query-api
+curl http://localhost:9090          # Prometheus
 ```
 
 ### Kafka Monitoring
@@ -354,6 +388,7 @@ Features:
 - Consumer lag monitoring
 - Broker health
 - Message inspection
+- Schema Registry integration
 
 ### Database Monitoring
 

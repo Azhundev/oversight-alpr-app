@@ -41,7 +41,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 ## System Summary
 
-**Total Services**: 12 core services + 6 infrastructure services
+**Total Services**: 12 core services + 6 infrastructure services + 5 monitoring services
 
 **Edge Processing** (pilot.py):
 1. Camera Ingestion Service
@@ -66,6 +66,13 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 - Kafka UI (web monitoring)
 - TimescaleDB (time-series database)
 - MinIO (S3-compatible object storage)
+
+**Monitoring Stack** (Docker):
+- Prometheus (metrics collection and storage)
+- Grafana (metrics visualization and dashboards)
+- Loki (log aggregation)
+- Promtail (log shipping)
+- cAdvisor (container resource metrics)
 
 **Key Features**:
 - Real-time plate detection and recognition
@@ -1095,6 +1102,76 @@ minio:
 - High-performance local storage
 - Docker volume persistence (`minio-data`)
 - Health checks and monitoring
+
+### Monitoring & Observability
+
+**Prometheus** (`prom/prometheus:latest`)
+- Metrics collection and time-series storage
+- Port: 9090
+- Scrape interval: 5-30s depending on target
+- Container: `alpr-prometheus`
+- Config: `core-services/monitoring/prometheus/prometheus.yml`
+
+**Key Features**:
+- Scrapes metrics from all ALPR services
+- 30-day retention
+- PromQL query language
+- Alert rule evaluation
+- Targets: pilot.py, kafka-consumer, query-api, cAdvisor
+
+**Grafana** (`grafana/grafana:latest`)
+- Metrics visualization and dashboards
+- Port: 3000
+- Login: `admin` / `alpr_admin_2024`
+- Container: `alpr-grafana`
+
+**Pre-configured Dashboards**:
+- **ALPR Overview** - Real-time FPS, detections, processing latency
+- **System Performance** - CPU, RAM, network usage per container
+- **Kafka & Database** - Message consumption, DB operations
+- **Logs Explorer** - Centralized log search
+
+**Loki** (`grafana/loki:latest`)
+- Log aggregation system
+- Port: 3100
+- Container: `alpr-loki`
+- Config: `core-services/monitoring/loki/loki-config.yaml`
+
+**Key Features**:
+- Lightweight log aggregation
+- LogQL query language
+- 7-day retention
+- Integration with Grafana
+- Label-based indexing
+
+**Promtail** (`grafana/promtail:latest`)
+- Log shipping agent
+- Port: 9080 (internal)
+- Container: `alpr-promtail`
+- Config: `core-services/monitoring/promtail/promtail-config.yaml`
+
+**Key Features**:
+- Ships logs from Docker containers to Loki
+- Ships logs from application log files
+- Label extraction
+- Multi-line log support
+
+**cAdvisor** (`gcr.io/cadvisor/cadvisor:latest`)
+- Container resource metrics
+- Port: 8082 (external, changed from 8080 to avoid Kafka UI conflict)
+- Container: `alpr-cadvisor`
+
+**Key Features**:
+- CPU, memory, network, disk metrics per container
+- Real-time monitoring
+- Historical resource usage
+- Prometheus metrics export
+
+**Access URLs**:
+- Grafana: http://localhost:3000
+- Prometheus: http://localhost:9090
+- Loki: http://localhost:3100 (API only)
+- cAdvisor: http://localhost:8082
 
 ### Docker Compose Stack
 

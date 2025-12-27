@@ -1,0 +1,17 @@
+# Grafana Dashboards Provisioning
+# Automatically loads dashboard JSON files from /var/lib/grafana/dashboards
+
+apiVersion: 1
+
+providers:
+  # ALPR System Dashboards
+  - name: 'ALPR Dashboards'
+    orgId: 1
+    folder: 'ALPR'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: true

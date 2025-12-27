@@ -1,0 +1,52 @@
+# Promtail Configuration for ALPR Log Shipping
+# Collects logs from Docker containers and ships to Loki
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Docker container logs
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["com.docker.compose.project=ovr-alpr"]
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: 'logstream'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'service'
+    pipeline_stages:
+      - docker: {}
+
+  # ALPR Pilot logs (runs on host)
+  - job_name: alpr-pilot
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: alpr-pilot
+          service: pilot
+          __path__: /logs/pilot_*.log
+
+  # Kafka Consumer logs
+  - job_name: kafka-consumer
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: kafka-consumer
+          service: storage
+          __path__: /logs/avro_consumer_*.log

@@ -44,6 +44,14 @@ flowchart TB
         subgraph "API Layer"
             API["🌐 Query API<br/>✅ PRODUCTION<br/>FastAPI + OpenAPI<br/>50-100 req/s"]
         end
+
+        subgraph "Monitoring Stack"
+            PROM["📊 Prometheus<br/>✅ PRODUCTION<br/>Metrics collection<br/>30-day retention"]
+            GRAF["📈 Grafana<br/>✅ PRODUCTION<br/>4 Dashboards<br/>localhost:3000"]
+            LOKI["📝 Loki<br/>✅ PRODUCTION<br/>Log aggregation<br/>7-day retention"]
+            PTAIL["🚚 Promtail<br/>✅ PRODUCTION<br/>Log shipping"]
+            CADV["📦 cAdvisor<br/>✅ PRODUCTION<br/>Container metrics<br/>localhost:8082"]
+        end
     end
 
     subgraph "Schema Definitions"
@@ -95,13 +103,24 @@ flowchart TB
     UI -.->|"Monitor"| KAFKA
     UI -.->|"View schemas"| SR
 
+    %% Monitoring Flow
+    PROM -.->|"Scrape"| PUB
+    PROM -.->|"Scrape"| CONS
+    PROM -.->|"Scrape"| API
+    PROM -.->|"Scrape"| CADV
+    GRAF -.->|"Query"| PROM
+    GRAF -.->|"Query"| LOKI
+    PTAIL -.->|"Ship logs"| LOKI
+    CADV -.->|"Export metrics"| PROM
+    ADMIN <-->|"View dashboards"| GRAF
+
     %% Styling
     classDef production fill:#90EE90,stroke:#228B22,stroke-width:2px,color:#000
     classDef config fill:#FFE4B5,stroke:#DAA520,stroke-width:2px,color:#000
     classDef schema fill:#E6E6FA,stroke:#9370DB,stroke-width:2px,color:#000
     classDef client fill:#87CEEB,stroke:#4682B4,stroke-width:2px,color:#000
 
-    class CAM,DET,TRK,OCR,EVT,PUB,IMG,ZK,KAFKA,SR,UI,CONS,STORE,TSDB,MINIO,API production
+    class CAM,DET,TRK,OCR,EVT,PUB,IMG,ZK,KAFKA,SR,UI,CONS,STORE,TSDB,MINIO,API,PROM,GRAF,LOKI,PTAIL,CADV production
     class CFG1,CFG2,CFG3 config
     class SCHEMA schema
     class CLIENT,ADMIN client
@@ -113,9 +132,9 @@ flowchart TB
 
 ```mermaid
 pie title "Implementation Status (By Component Count)"
-    "Fully Implemented (Production)" : 15
+    "Fully Implemented (Production)" : 20
     "Partially Implemented" : 2
-    "Not Implemented" : 10
+    "Not Implemented" : 5
 ```
 
 ---
@@ -143,6 +162,14 @@ graph LR
         B7["MinIO ✅"]
     end
 
+    subgraph "Monitoring Services (5)"
+        M1["Prometheus ✅"]
+        M2["Grafana ✅"]
+        M3["Loki ✅"]
+        M4["Promtail ✅"]
+        M5["cAdvisor ✅"]
+    end
+
     subgraph "Infrastructure (3)"
         I1["Docker Compose ✅"]
         I2["Main Pipeline ✅"]
@@ -154,6 +181,13 @@ graph LR
     B3 -.-> B2
     B5 <--> B6
     B7 -.-> B6
+    M1 -.-> E6
+    M1 -.-> B3
+    M1 -.-> B6
+    M1 -.-> M5
+    M2 -.-> M1
+    M2 -.-> M3
+    M4 -.-> M3
 ```
 
 ---
@@ -258,9 +292,9 @@ gantt
     Schema Registry            :done, p2f, 2025-12-25, 1d
 
     section Phase 3: Production
-    Monitoring Stack           :active, p3a, 2025-12-26, 7d
-    Alert Engine               :p3b, 2026-01-02, 14d
-    BI Dashboards              :p3c, 2026-01-16, 7d
+    Monitoring Stack           :done, p3a, 2025-12-26, 1d
+    Alert Engine               :active, p3b, 2025-12-27, 14d
+    BI Dashboards              :p3c, 2026-01-10, 7d
 
     section Phase 4: Enterprise
     Elasticsearch              :p4a, 2026-01-23, 14d
@@ -303,9 +337,16 @@ mindmap
       Pydantic
     Infrastructure
       Docker 24.x
+      Docker 24.x
       Docker Compose
       NVIDIA Jetson Orin NX
       Ubuntu 20.04
+    Monitoring
+      Prometheus 2.x
+      Grafana 10.x
+      Loki 2.x
+      Promtail 2.x
+      cAdvisor
 ```
 
 ---
@@ -323,9 +364,9 @@ graph LR
     end
 
     subgraph "Phase 3 Goals 🎯"
-        G1["Prometheus metrics"]
-        G2["Grafana dashboards"]
-        G3["Real-time alerts"]
+        G1["Prometheus metrics ✅"]
+        G2["Grafana dashboards ✅"]
+        G3["Real-time alerts 🔄"]
         G4["Watchlist matching"]
         G5["Multi-topic architecture"]
     end
@@ -391,9 +432,9 @@ graph TB
   - 🔴 = Critical Gap
   - 🟢 = Working Well
 
-- **Overall Completion:** 45% of original vision (95% of core features)
-- **Current Phase:** Phase 2+ (Production-Ready with Object Storage)
-- **Next Phase:** Phase 3 (Production Essentials - Monitoring & Alerting)
+- **Overall Completion:** 75% of original vision (100% of core features, 90% of Phase 3)
+- **Current Phase:** Phase 3 (Production Essentials - Monitoring Stack Complete)
+- **Next Phase:** Phase 3 Completion (Alert Engine & BI Integration)
 
 ---
 
