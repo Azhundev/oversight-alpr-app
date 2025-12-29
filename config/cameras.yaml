@@ -43,10 +43,10 @@ onvif:
 
 # Video file sources (for testing)
 video_sources:
-  - id: TEST-001
-    name: "Test Video - IMG_6941.MOV"
-    file_path: "videos/training/IMG_6941.MOV"
-    loop: true  # Loop video for continuous testing
+  - id: CAM1
+    name: "Test Video - CPU Decode"
+    file_path: "videos/test_h264.avi"
+    loop: true  # Software decode handles looping fine
     enabled: true
     settings:
       fps: 30  # Target 30fps for smooth playback

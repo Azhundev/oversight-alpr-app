@@ -1,0 +1,204 @@
+# Alert Rules Configuration for ALPR System
+# This file defines when and how to send notifications based on plate detection events
+
+# Notification Channel Configuration
+notifications:
+  # Email notifications via SMTP
+  email:
+    enabled: false  # Set to true and configure to enable
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    use_tls: true
+    username: "alpr-alerts@example.com"
+    password: "${SMTP_PASSWORD}"  # Set via environment variable
+    from_address: "ALPR Alerts <alpr-alerts@example.com>"
+    recipients:
+      - "security@example.com"
+      - "admin@example.com"
+
+  # Slack notifications via webhooks
+  slack:
+    enabled: false  # Set to true and configure to enable
+    webhook_url: "${SLACK_WEBHOOK_URL}"  # Set via environment variable
+    channel: "#alpr-alerts"
+    username: "ALPR Alert Bot"
+    icon_emoji: ":rotating_light:"
+
+  # Generic webhook notifications
+  webhook:
+    enabled: false  # Set to true and configure to enable
+    url: "https://api.example.com/alpr/webhook"
+    method: "POST"  # POST or PUT
+    headers:
+      Authorization: "Bearer ${WEBHOOK_TOKEN}"  # Set via environment variable
+      Content-Type: "application/json"
+    timeout: 10  # seconds
+
+  # SMS notifications via Twilio
+  sms:
+    enabled: false  # Set to true and configure to enable
+    twilio_account_sid: "${TWILIO_ACCOUNT_SID}"  # Set via environment variable
+    twilio_auth_token: "${TWILIO_AUTH_TOKEN}"  # Set via environment variable
+    from_number: "+15551234567"
+    to_numbers:
+      - "+15559876543"
+
+# Alert Rules
+# Each rule has conditions that trigger notifications
+rules:
+  # Rule 1: Watchlist Plate Detection
+  - id: "watchlist_plate"
+    name: "Watchlist Plate Detected"
+    enabled: true
+    priority: "high"
+    description: "Alert when a plate from the watchlist is detected"
+    conditions:
+      - field: "plate.normalized_text"
+        operator: "in_list"
+        value: ["ABC123", "XYZ789", "TEST001"]  # Add your watchlist plates here
+    notify: ["email", "slack", "sms"]
+    rate_limit:
+      enabled: true
+      cooldown_seconds: 300  # Don't re-alert for same plate within 5 minutes
+      dedup_key: "plate.normalized_text"
+    message_template: |
+      🚨 WATCHLIST PLATE DETECTED
+
+      Plate: {plate.normalized_text} (Confidence: {plate.confidence:.2%})
+      Camera: {camera_id}
+      Time: {captured_at}
+      Track ID: {track_id}
+
+      Vehicle Type: {vehicle.type}
+      Vehicle Color: {vehicle.color}
+
+      Image: {images.plate_url}
+
+  # Rule 2: High Confidence Detection
+  - id: "high_confidence_detection"
+    name: "High Confidence Plate Detection"
+    enabled: false  # Disabled by default to avoid spam
+    priority: "low"
+    description: "Alert for very high confidence detections (useful for testing)"
+    conditions:
+      - field: "plate.confidence"
+        operator: "greater_than"
+        value: 0.95
+    notify: ["slack"]
+    rate_limit:
+      enabled: true
+      cooldown_seconds: 60
+      dedup_key: "plate.normalized_text"
+    message_template: |
+      ✅ High Confidence Detection
+
+      Plate: {plate.normalized_text} ({plate.confidence:.2%})
+      Camera: {camera_id}
+      Time: {captured_at}
+
+  # Rule 3: Specific Camera Alert
+  - id: "camera_gate_entrance"
+    name: "Gate Entrance Detection"
+    enabled: false  # Enable when you want alerts for specific camera
+    priority: "medium"
+    description: "Alert for all detections at the gate entrance camera"
+    conditions:
+      - field: "camera_id"
+        operator: "equals"
+        value: "gate_entrance"  # Change to your camera ID
+    notify: ["webhook"]
+    rate_limit:
+      enabled: true
+      cooldown_seconds: 30
+      dedup_key: "track_id"  # Rate limit by track, not plate
+    message_template: |
+      🚗 Vehicle at Gate Entrance
+
+      Plate: {plate.normalized_text}
+      Camera: {camera_id}
+      Time: {captured_at}
+      Track: {track_id}
+
+  # Rule 4: Low Confidence Warning
+  - id: "low_confidence_warning"
+    name: "Low Confidence Detection Warning"
+    enabled: false  # Enable for quality monitoring
+    priority: "low"
+    description: "Alert when confidence is below threshold (for monitoring OCR quality)"
+    conditions:
+      - field: "plate.confidence"
+        operator: "less_than"
+        value: 0.7
+    notify: ["slack"]
+    rate_limit:
+      enabled: true
+      cooldown_seconds: 300
+      dedup_key: "camera_id"  # Rate limit by camera
+    message_template: |
+      ⚠️ Low Confidence Detection
+
+      Plate: {plate.text} ({plate.confidence:.2%})
+      Camera: {camera_id}
+      Time: {captured_at}
+
+      Note: Consider checking camera focus or lighting
+
+  # Rule 5: Pattern Match (Regex Example)
+  - id: "florida_plate_pattern"
+    name: "Florida Plate Pattern Match"
+    enabled: false  # Example of regex matching
+    priority: "medium"
+    description: "Alert for plates matching Florida pattern (3 letters + 3 digits)"
+    conditions:
+      - field: "plate.normalized_text"
+        operator: "regex"
+        value: "^[A-Z]{3}[0-9]{3}$"  # Florida pattern: ABC123
+    notify: ["slack"]
+    rate_limit:
+      enabled: true
+      cooldown_seconds: 60
+      dedup_key: "plate.normalized_text"
+    message_template: |
+      🌴 Florida Plate Detected
+
+      Plate: {plate.normalized_text}
+      Camera: {camera_id}
+      Time: {captured_at}
+
+  # Rule 6: Multi-Condition Example
+  - id: "high_value_target"
+    name: "High Value Target Detection"
+    enabled: false  # Example of multiple conditions
+    priority: "high"
+    description: "Alert for high-confidence plates from specific cameras"
+    conditions:
+      - field: "plate.confidence"
+        operator: "greater_than"
+        value: 0.9
+      - field: "camera_id"
+        operator: "contains"
+        value: "entrance"  # Matches any camera with "entrance" in ID
+    notify: ["email", "slack", "sms"]
+    rate_limit:
+      enabled: true
+      cooldown_seconds: 180
+      dedup_key: "plate.normalized_text"
+    message_template: |
+      🎯 High Value Detection
+
+      Plate: {plate.normalized_text} (Confidence: {plate.confidence:.2%})
+      Camera: {camera_id}
+      Time: {captured_at}
+      Track ID: {track_id}
+
+      This is a high-confidence detection from an entrance camera.
+
+# Notes:
+# - Rules are evaluated in order (top to bottom)
+# - Multiple rules can match the same event
+# - Use rate_limit to prevent alert spam
+# - Message templates support Python format strings with event fields
+# - Available operators: equals, contains, regex, in_list, greater_than, less_than
+# - Nested fields accessed with dot notation: plate.normalized_text, vehicle.color, etc.
+# - Environment variables in ${VAR_NAME} format will be substituted at runtime
+# - Set notification channel enabled=true to activate

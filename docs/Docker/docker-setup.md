@@ -76,15 +76,15 @@ The project uses Docker Compose to orchestrate multiple services that support th
 ### Kafka Consumer
 - **Container**: `alpr-kafka-consumer`
 - **Purpose**: Consumes plate events from Kafka and stores in TimescaleDB
-- **Built from**: `services/storage/Dockerfile`
-- **Dependencies**: `services/storage/requirements.txt`
+- **Built from**: `core-services/storage/Dockerfile`
+- **Dependencies**: `core-services/storage/requirements.txt`
 - **Depends on**: Kafka and TimescaleDB
 - **Logs**: Written to `./logs` directory
 
 ### Query API
 - **Container**: `alpr-query-api`
 - **Purpose**: REST API for querying historical plate detection events
-- **Built from**: `services/api/Dockerfile`
+- **Built from**: `core-services/api/Dockerfile`
 - **Port**: 8000
 - **Depends on**: TimescaleDB
 - **API Docs**: http://localhost:8000/docs
@@ -295,7 +295,7 @@ For local development without Docker:
 
 2. Run the consumer locally:
    ```bash
-   python3 services/storage/kafka_consumer.py
+   python3 core-services/storage/kafka_consumer.py
    ```
 
 ### Running in Production

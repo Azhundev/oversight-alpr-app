@@ -55,7 +55,7 @@ def should_run_ocr(self, track_id):
 ### 5. Plate Detection Image Size Mismatch
 **Problem**: Initially discovered that plate detector was using `imgsz=416` while we assumed it should be 640.
 
-**Location**: `services/detector/detector_service.py:207`
+**Location**: `edge-services/detector/detector_service.py:207`
 
 **Resolution**: After testing, confirmed the plate model was actually trained at 416x416. Attempting to use 640 caused:
 ```
@@ -198,7 +198,7 @@ parser.add_argument("--no-adaptive-sampling", action="store_true", default=True,
 ### 5. Maintained Correct Plate Model Image Size
 **Change**: Kept `imgsz=416` after discovering it was the correct training size.
 
-**File**: `services/detector/detector_service.py:207`
+**File**: `edge-services/detector/detector_service.py:207`
 
 **Final Code**:
 ```python

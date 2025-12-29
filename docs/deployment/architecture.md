@@ -150,7 +150,7 @@ The system uses a **hybrid architecture** combining edge computing (Jetson) with
 
 ### 1. Camera Manager
 
-**Location**: `services/camera/camera_ingestion.py`
+**Location**: `edge-services/camera/camera_ingestion.py`
 
 **Responsibilities**:
 - Multi-camera support (USB, IP/RTSP, video files)
@@ -168,7 +168,7 @@ The system uses a **hybrid architecture** combining edge computing (Jetson) with
 
 ### 2. YOLOv11 Detector
 
-**Location**: `services/detector/detector_service.py`
+**Location**: `edge-services/detector/detector_service.py`
 
 **Responsibilities**:
 - Vehicle detection (cars, trucks, motorcycles)
@@ -189,7 +189,7 @@ The system uses a **hybrid architecture** combining edge computing (Jetson) with
 
 ### 3. OCR Service
 
-**Location**: `services/ocr/ocr_service.py`
+**Location**: `edge-services/ocr/ocr_service.py`
 
 **Responsibilities**:
 - License plate text recognition
@@ -206,7 +206,7 @@ The system uses a **hybrid architecture** combining edge computing (Jetson) with
 
 ### 4. ByteTrack Tracker
 
-**Location**: `services/tracker/bytetrack_service.py`
+**Location**: `edge-services/tracker/bytetrack_service.py`
 
 **Responsibilities**:
 - Multi-object tracking across frames
@@ -223,7 +223,7 @@ The system uses a **hybrid architecture** combining edge computing (Jetson) with
 
 ### 5. Event Processor
 
-**Location**: `services/event_processor/event_processor_service.py`
+**Location**: `edge-services/event_processor/event_processor_service.py`
 
 **Responsibilities**:
 - Plate read validation (confidence, format)
@@ -261,7 +261,7 @@ The system uses a **hybrid architecture** combining edge computing (Jetson) with
 ### 7. Kafka Consumer
 
 **Container**: `alpr-kafka-consumer`
-**Location**: `services/storage/kafka_consumer.py`
+**Location**: `core-services/storage/kafka_consumer.py`
 
 **Responsibilities**:
 - Consume events from Kafka
@@ -311,7 +311,7 @@ CREATE INDEX idx_camera_id ON plate_events (camera_id);
 ### 9. Query API
 
 **Container**: `alpr-query-api`
-**Location**: `services/api/query_api.py`
+**Location**: `core-services/api/query_api.py`
 **Technology**: FastAPI
 
 **Responsibilities**:

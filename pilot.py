@@ -16,18 +16,21 @@ from loguru import logger
 import csv
 from datetime import datetime
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add project root and service directories to path
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / "edge-services"))
+sys.path.insert(0, str(project_root / "core-services"))
 
-from services.camera.camera_ingestion import CameraManager
-from services.detector.detector_service import YOLOv11Detector
-from services.ocr.ocr_service import PaddleOCRService
-from services.tracker.bytetrack_service import ByteTrackService, Detection
+from camera.camera_ingestion import CameraManager
+from detector.detector_service import YOLOv11Detector
+from ocr.ocr_service import PaddleOCRService
+from tracker.bytetrack_service import ByteTrackService, Detection
 from shared.utils.tracking_utils import bbox_to_numpy, get_track_color, draw_track_id
-from services.event_processor.event_processor_service import EventProcessorService
-from services.event_processor.kafka_publisher import KafkaPublisher, MockKafkaPublisher
-from services.event_processor.avro_kafka_publisher import AvroKafkaPublisher
-from services.storage.image_storage_service import ImageStorageService
+from event_processor.event_processor_service import EventProcessorService
+from event_processor.kafka_publisher import KafkaPublisher, MockKafkaPublisher
+from event_processor.avro_kafka_publisher import AvroKafkaPublisher
+from storage.image_storage_service import ImageStorageService
 
 # Prometheus metrics
 from prometheus_client import Counter, Gauge, Histogram, start_http_server

@@ -309,7 +309,7 @@ Expected output:
 
 ### 2. Check Code Configuration
 ```bash
-grep -n "fp16\|int8" pilot.py services/detector/detector_service.py
+grep -n "fp16\|int8" pilot.py edge-services/detector/detector_service.py
 ```
 
 ### 3. Monitor Inference Times

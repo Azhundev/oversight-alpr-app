@@ -127,7 +127,7 @@ services:
   kafka-consumer:
     build:
       context: .
-      dockerfile: services/storage/Dockerfile
+      dockerfile: core-services/storage/Dockerfile
     container_name: alpr-kafka-consumer
     depends_on:
       kafka:
@@ -151,6 +151,41 @@ services:
       DB_USER: alpr
       DB_PASSWORD: alpr_secure_pass
     volumes:
+      - ./logs:/app/logs
+    networks:
+      - alpr-network
+    restart: unless-stopped
+
+  # Alert Engine - Real-time notifications based on configured rules
+  alert-engine:
+    build:
+      context: .
+      dockerfile: core-services/alerting/Dockerfile
+    container_name: alpr-alert-engine
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    ports:
+      - "8003:8003"  # Prometheus metrics
+    environment:
+      # Kafka configuration
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: alpr.plates.detected
+      KAFKA_GROUP_ID: alpr-alert-engine
+      # Schema Registry configuration
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      # Rules configuration
+      RULES_CONFIG_PATH: /app/config/alert_rules.yaml
+      # Notification secrets (set in .env file or pass via environment)
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SLACK_WEBHOOK_URL: "${SLACK_WEBHOOK_URL:-}"
+      WEBHOOK_TOKEN: "${WEBHOOK_TOKEN:-}"
+      TWILIO_ACCOUNT_SID: "${TWILIO_ACCOUNT_SID:-}"
+      TWILIO_AUTH_TOKEN: "${TWILIO_AUTH_TOKEN:-}"
+    volumes:
+      - ./config/alert_rules.yaml:/app/config/alert_rules.yaml:ro
       - ./logs:/app/logs
     networks:
       - alpr-network
@@ -199,7 +234,7 @@ services:
   query-api:
     build:
       context: .
-      dockerfile: services/api/Dockerfile
+      dockerfile: core-services/api/Dockerfile
     container_name: alpr-query-api
     depends_on:
       timescaledb:
@@ -228,7 +263,133 @@ services:
       retries: 3
       start_period: 10s
 
+  # ============================================================================
+  # MONITORING STACK
+  # ============================================================================
+
+  # Prometheus - Metrics collection and storage
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: alpr-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./core-services/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - alpr-network
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Grafana - Metrics visualization and dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: alpr-grafana
+    depends_on:
+      - prometheus
+      - loki
+    ports:
+      - "3000:3000"
+    environment:
+      # Admin credentials
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: alpr_admin_2024
+      # Server settings
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_SERVER_SERVE_FROM_SUB_PATH: false
+      # Anonymous access (disable in production)
+      GF_AUTH_ANONYMOUS_ENABLED: false
+      # Provisioning
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      # Performance
+      GF_ANALYTICS_REPORTING_ENABLED: false
+      GF_ANALYTICS_CHECK_FOR_UPDATES: false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./core-services/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./core-services/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - alpr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Loki - Log aggregation
+  loki:
+    image: grafana/loki:latest
+    container_name: alpr-loki
+    command: -config.file=/etc/loki/loki-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./core-services/monitoring/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+    networks:
+      - alpr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Promtail - Log shipper for Loki
+  promtail:
+    image: grafana/promtail:latest
+    container_name: alpr-promtail
+    depends_on:
+      - loki
+    command: -config.file=/etc/promtail/promtail-config.yaml
+    volumes:
+      - ./core-services/monitoring/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./logs:/logs:ro
+    networks:
+      - alpr-network
+    restart: unless-stopped
+
+  # cAdvisor - Container metrics exporter
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: alpr-cadvisor
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    ports:
+      - "8082:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - alpr-network
+    restart: unless-stopped
+    command:
+      - '--housekeeping_interval=10s'
+      - '--docker_only=true'
+      - '--disable_metrics=percpu,sched,tcp,udp,disk,diskIO,hugetlb,referenced_memory,cpu_topology,resctrl'
+
 volumes:
+  # Data persistence volumes
   zookeeper-data:
     driver: local
   zookeeper-logs:
@@ -238,6 +399,14 @@ volumes:
   timescaledb-data:
     driver: local
   minio-data:
+    driver: local
+
+  # Monitoring stack volumes
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  loki-data:
     driver: local
 
 networks:
