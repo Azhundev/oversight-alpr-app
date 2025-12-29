@@ -1,4 +1,76 @@
-- remember how to retrain the yolo11n-plate-custom.pt
-- remember to always create new .md files inside the doc files
-- remember to always create new .md files inside the doc folder
-- remember to always create new .md files inside the docs folder
+## Project Instructions for Claude Code
+
+### Documentation
+- Always create new .md files inside the `docs/` folder (organized by topic)
+- Keep documentation up to date when adding features
+- Use existing documentation structure (see docs/ALPR_Pipeline/)
+
+### Model Training
+- **YOLOv11 Plate Model**: `models/yolo11n-plate.pt`
+  - Training data: License plate images with annotations
+  - Retrain using: `yolo detect train data=plates.yaml model=yolo11n.pt epochs=100 imgsz=640`
+  - Export to TensorRT: `yolo export model=best.pt format=engine device=0 half=True`
+
+### System Architecture
+- **Edge Processing**: `pilot.py` runs on Jetson (detection, tracking, OCR)
+- **Core Services**: Docker containers (Kafka, DB, API, Alerts, Monitoring)
+- **Configuration**: All YAML files in `config/` directory
+- **Service Folder Structure**:
+  - `edge-services/`: Edge processing (camera, detector, tracker, ocr, events)
+  - `core-services/`: Backend (storage, api, alerting, monitoring)
+
+### Important Ports
+- 8000: Query API
+- 8001: Pilot metrics (edge)
+- 8003: Alert Engine metrics
+- 8080: Kafka UI
+- 8081: Schema Registry
+- 3000: Grafana
+- 9090: Prometheus
+- 9000/9001: MinIO (API/Console)
+- 5432: TimescaleDB
+
+### Key Commands
+```bash
+# Start backend services
+docker compose up -d
+
+# Run edge pipeline
+python3 pilot.py
+
+# View logs
+docker logs -f alpr-kafka-consumer
+docker logs -f alpr-alert-engine
+
+# Access services
+http://localhost:8000/docs     # API docs
+http://localhost:3000           # Grafana dashboards
+http://localhost:8080           # Kafka UI
+http://localhost:9001           # MinIO Console
+```
+
+### Service Dependencies
+- Kafka Consumer depends on: Kafka, Schema Registry, TimescaleDB
+- Alert Engine depends on: Kafka, Schema Registry
+- Query API depends on: TimescaleDB, MinIO
+- Pilot (edge) publishes to: Kafka (localhost:9092)
+
+### Recent Major Changes
+- ✅ Added Alert Engine with multi-channel notifications (2025-12-28)
+- ✅ Completed monitoring stack (Prometheus, Grafana, Loki) (2025-12-28)
+- ✅ Added MinIO object storage integration (2025-12-27)
+- ✅ Migrated to Avro serialization with Schema Registry (2025-12-26)
+- ✅ Implemented TimescaleDB hypertables (2025-12-25)
+
+### Common Tasks
+1. **Add new alert rule**: Edit `config/alert_rules.yaml`, restart alert-engine
+2. **Add new camera**: Edit `config/cameras.yaml`, restart pilot.py
+3. **View metrics**: Check Grafana dashboards at http://localhost:3000
+4. **Query events**: Use REST API at http://localhost:8000/docs
+5. **Debug Kafka**: Use Kafka UI at http://localhost:8080
+
+### Current System Status
+- Phase 3 COMPLETE: Production-ready distributed ALPR system
+- 13 core services + 6 infrastructure + 5 monitoring services
+- 90% of core features implemented
+- Next: Phase 4 Enterprise Features (BI, Elasticsearch, multi-site)

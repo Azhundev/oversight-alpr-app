@@ -40,7 +40,10 @@ python3 pilot.py --help
 ### 3. Access Services
 
 - **Query API:** http://localhost:8000/docs (interactive API documentation)
+- **Grafana Dashboards:** http://localhost:3000 (admin/alpr_admin_2024)
+- **Prometheus:** http://localhost:9090 (metrics and alerts)
 - **Kafka UI:** http://localhost:8080 (message broker monitoring)
+- **MinIO Console:** http://localhost:9001 (object storage)
 - **Database:** `localhost:5432` (TimescaleDB)
 
 ---
@@ -56,10 +59,13 @@ python3 pilot.py --help
 6. **Publishes** to Kafka message broker
 
 ### Backend Services (Docker)
-7. **Streams** events via Apache Kafka
+7. **Streams** events via Apache Kafka with Schema Registry
 8. **Stores** events in TimescaleDB (time-series database)
-9. **Provides** REST API for querying events
-10. **Monitors** via Kafka UI web interface
+9. **Stores** images in MinIO (S3-compatible storage)
+10. **Provides** REST API for querying events
+11. **Alerts** via multi-channel notification engine
+12. **Monitors** via Prometheus, Grafana, and Loki
+13. **Manages** via Kafka UI web interface
 
 ---
 
@@ -133,9 +139,12 @@ python3 pilot.py --help
 | **Detection** | YOLOv11 + TensorRT | Vehicle & plate detection |
 | **OCR** | PaddleOCR | License plate text recognition |
 | **Tracking** | ByteTrack | Multi-object tracking |
-| **Messaging** | Apache Kafka | Event streaming |
+| **Messaging** | Apache Kafka + Schema Registry | Event streaming with Avro |
 | **Database** | TimescaleDB (PostgreSQL 16) | Time-series storage |
+| **Object Storage** | MinIO | S3-compatible image storage |
 | **API** | FastAPI | REST endpoints |
+| **Monitoring** | Prometheus + Grafana + Loki | Metrics and logs |
+| **Alerting** | Alert Engine | Multi-channel notifications |
 | **Deployment** | Docker Compose | Container orchestration |
 
 ---
@@ -153,14 +162,18 @@ OVR-ALPR/
 │   ├── tracking.yaml          # ByteTrack parameters
 │   └── ocr.yaml               # PaddleOCR settings
 │
-├── services/                   # Service implementations
+├── edge-services/             # Edge device services (Jetson)
 │   ├── camera/                # Video ingestion
 │   ├── detector/              # YOLO detection
 │   ├── tracker/               # ByteTrack tracking
 │   ├── ocr/                   # PaddleOCR service
-│   ├── event_processor/       # Event validation & publishing
-│   ├── storage/               # Database persistence
-│   └── api/                   # Query API (FastAPI)
+│   └── event_processor/       # Event validation & publishing
+│
+├── core-services/             # Backend services (Docker)
+│   ├── storage/               # Kafka → TimescaleDB consumer
+│   ├── api/                   # Query API (FastAPI)
+│   ├── alerting/              # Alert Engine (notifications)
+│   └── monitoring/            # Prometheus, Grafana, Loki
 │
 ├── scripts/                    # Utility scripts
 │   ├── init_db.sql            # Database initialization
@@ -259,15 +272,15 @@ KAFKA_TOPIC=alpr.plates.detected
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Edge Processing | ✅ Complete | TensorRT optimized |
-| Kafka Messaging | ✅ Complete | Event streaming |
-| Database Storage | ✅ Complete | TimescaleDB |
+| Kafka Messaging | ✅ Complete | Event streaming with Avro |
+| Database Storage | ✅ Complete | TimescaleDB with hypertables |
 | Query API | ✅ Complete | FastAPI with docs |
 | Docker Deployment | ✅ Complete | All services containerized |
-| Object Storage | 🔄 Planned | MinIO (Phase 3) |
-| Monitoring | 🔄 Planned | Prometheus/Grafana (Phase 3) |
-| Alerting | 🔄 Planned | Real-time notifications (Phase 3) |
+| Object Storage | ✅ Complete | MinIO with async uploads |
+| Monitoring Stack | ✅ Complete | Prometheus + Grafana + Loki |
+| Alert Engine | ✅ Complete | Multi-channel notifications |
 
-**Overall:** 36% of original vision, 85% of core ALPR features
+**Overall:** 90% of core features complete, production-ready system
 
 **See:** [docs/ALPR_Pipeline/Project_Status.md](docs/ALPR_Pipeline/Project_Status.md)
 
@@ -275,20 +288,23 @@ KAFKA_TOPIC=alpr.plates.detected
 
 ## 🛣️ Roadmap
 
-### Phase 3: Production Essentials (1-2 months)
-- MinIO object storage for images
-- Prometheus + Grafana monitoring
-- Alert engine (email, Slack, SMS)
-- BI dashboards
+### ✅ Phase 3: Production Essentials (COMPLETE)
+- ✅ MinIO object storage for images
+- ✅ Prometheus + Grafana + Loki monitoring stack
+- ✅ Alert engine (Email, Slack, Webhook, SMS)
+- ✅ Pre-configured Grafana dashboards
 
-### Phase 4: Enterprise Features (2-4 months)
+### Phase 4: Enterprise Features (Next Priority)
+- Advanced BI dashboards and analytics
 - Elasticsearch for full-text search
-- Schema registry for event versioning
-- Advanced analytics
+- Multi-site deployment orchestration
+- Advanced reporting and data retention policies
 
-### Phase 5: Scale Optimization (4-6 months)
+### Phase 5: Scale Optimization (Future)
 - DeepStream migration (6-8x throughput)
 - Triton Inference Server
+- Kubernetes deployment
+- Multi-region replication
 
 **See:** [docs/ALPR_Pipeline/ALPR_Next_Steps.md](docs/ALPR_Pipeline/ALPR_Next_Steps.md)
 
@@ -372,11 +388,23 @@ docker exec -it alpr-timescaledb psql -U alpr -d alpr_db
 ### System Metrics
 
 ```bash
+# Grafana dashboards (comprehensive metrics)
+http://localhost:3000
+
+# Prometheus metrics
+curl http://localhost:9090/api/v1/targets
+
 # Jetson performance
 tegrastats
 
 # Docker resources
 docker stats
+
+# Service metrics
+curl http://localhost:8001/metrics  # Pilot (edge)
+curl http://localhost:8000/metrics  # Query API
+curl http://localhost:8003/metrics  # Alert Engine
+curl http://localhost:8082/metrics  # cAdvisor
 
 # View recent events
 curl http://localhost:8000/events/recent?limit=5

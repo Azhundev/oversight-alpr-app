@@ -18,6 +18,7 @@ Complete reference of all ports used by the ALPR pipeline components.
 | **Application Services** |
 | Query API | 8000 | 8000 | HTTP | REST API for queries | http://localhost:8000 |
 | Query API Metrics | 8000 | 8000 | HTTP | Prometheus metrics | http://localhost:8000/metrics |
+| Alert Engine | 8003 | 8003 | HTTP | Real-time alert processing | http://localhost:8003/metrics |
 | Kafka Consumer Metrics | 8002 | - | HTTP | Prometheus metrics (internal) | - |
 | ALPR Pilot Metrics | - | 8001 | HTTP | Edge processing metrics | http://localhost:8001/metrics |
 | **Monitoring Stack** |
@@ -43,9 +44,10 @@ Services for schema management and monitoring:
 - **Schema Registry (8081)**: Avro schema versioning
 - **Kafka UI (8080)**: Kafka cluster management and monitoring
 
-### Application Layer (Ports 8000-8002)
+### Application Layer (Ports 8000-8003)
 ALPR application services:
 - **Query API (8000)**: REST API + Prometheus metrics
+- **Alert Engine (8003)**: Real-time notification engine + metrics
 - **Kafka Consumer (8002)**: Internal metrics endpoint
 - **ALPR Pilot (8001)**: Edge processing metrics
 
@@ -105,6 +107,9 @@ curl http://localhost:8001/metrics
 # Query API
 curl http://localhost:8000/metrics
 
+# Alert Engine
+curl http://localhost:8003/metrics
+
 # Kafka Consumer (internal only - not exposed to host)
 # Access via: docker exec alpr-kafka-consumer curl localhost:8002/metrics
 
@@ -143,6 +148,7 @@ If running on a remote server, open these ports:
 - `9001` - MinIO Console
 - `9090` - Prometheus
 - `8082` - cAdvisor
+- `8003` - Alert Engine metrics
 
 **Database Access (Use with caution)**:
 - `5432` - TimescaleDB (only if remote access needed)
@@ -177,12 +183,20 @@ All services communicate on the `alpr-network` bridge network:
   - TimescaleDB: timescaledb:5432
   - MinIO: minio:9000
 
+### alert-engine (Alert Processing)
+- **Exposes**: 8003 (metrics)
+- **Connects to**:
+  - Kafka: kafka:29092
+  - Schema Registry: http://schema-registry:8081
+  - SMTP/Slack/Webhook/Twilio (for notifications)
+
 ### Prometheus
 - **Exposes**: 9090 (HTTP + metrics)
 - **Scrapes from**:
   - pilot.py: host.docker.internal:8001
   - kafka-consumer: kafka-consumer:8002
   - query-api: query-api:8000
+  - alert-engine: alert-engine:8003
   - cAdvisor: cadvisor:8080
 
 ### Grafana
@@ -322,6 +336,7 @@ Monitoring:
 Metrics:
   Pilot:           http://localhost:8001/metrics
   Query API:       http://localhost:8000/metrics
+  Alert Engine:    http://localhost:8003/metrics
 "'
 ```
 

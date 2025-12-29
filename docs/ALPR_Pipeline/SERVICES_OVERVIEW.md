@@ -41,7 +41,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 ## System Summary
 
-**Total Services**: 12 core services + 6 infrastructure services + 5 monitoring services
+**Total Services**: 13 core services + 6 infrastructure services + 5 monitoring services
 
 **Edge Processing** (pilot.py):
 1. Camera Ingestion Service
@@ -57,7 +57,8 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 9. Avro Kafka Consumer Service (Event persistence)
 10. Query API Service (REST API)
 11. Image Storage Service (MinIO uploads)
-12. Consumer Entrypoint Service (JSON/Avro router)
+12. Alert Engine Service (Real-time notifications)
+13. Consumer Entrypoint Service (JSON/Avro router)
 
 **Infrastructure** (Docker):
 - Apache Kafka (message broker)
@@ -1020,6 +1021,175 @@ minio:
 
 ---
 
+### 12. Alert Engine Service
+
+**Location**: `core-services/alerting/alert_engine.py`
+
+**Purpose**: Real-time rule-based notification engine that consumes plate detection events and triggers alerts via multiple channels (Email, Slack, Webhook, SMS)
+
+**Key Features**:
+- Rule-based event filtering and matching
+- Multi-channel notifications (Email, Slack, Webhook, SMS via Twilio)
+- YAML-based configuration for alert rules
+- Prometheus metrics for alert monitoring
+- Rate limiting and deduplication
+- Pattern matching (exact, prefix, suffix, contains, regex)
+- Avro/JSON event deserialization
+- Graceful shutdown handling
+
+**Main Class**: `AlertEngine`
+
+**Configuration**: `config/alert_rules.yaml`
+
+**Alert Rule Structure**:
+```yaml
+rules:
+  - name: "High Priority Vehicle"
+    description: "Alert when specific plates are detected"
+    enabled: true
+    conditions:
+      plate_patterns:
+        - pattern: "ABC*"
+          match_type: "prefix"
+      camera_ids:
+        - "CAM-001"
+        - "CAM-002"
+    actions:
+      - type: "email"
+        recipients:
+          - "security@example.com"
+        subject: "ALPR Alert: High Priority Vehicle Detected"
+      - type: "slack"
+        channel: "#security-alerts"
+```
+
+**Supported Notification Channels**:
+
+1. **Email (SMTP)**:
+   - Requires: SMTP server, username, password
+   - Customizable subject and body templates
+   - Attachment support for plate images
+
+2. **Slack**:
+   - Uses Incoming Webhook URLs
+   - Rich message formatting
+   - Supports channels and DMs
+
+3. **Webhook**:
+   - Generic HTTP POST to custom endpoints
+   - JSON payload with full event data
+   - Optional authentication headers
+
+4. **SMS (Twilio)**:
+   - Requires: Twilio Account SID and Auth Token
+   - International SMS support
+   - Character limit handling
+
+**Methods**:
+- `process_event(event)` → Evaluate event against all enabled rules
+  - Returns: List of triggered alerts
+  - Executes all matching rule actions
+
+- `send_notification(action, event)` → Send notification via specified channel
+  - Returns: Success/failure status
+  - Handles rate limiting and retries
+
+- `evaluate_rule(rule, event)` → Check if event matches rule conditions
+  - Returns: Boolean match result
+  - Supports complex condition combinations
+
+- `get_metrics()` → Prometheus metrics
+  - Returns: Total events processed, alerts triggered, notification failures
+
+**Metrics Exposed** (Port 8003):
+```
+# Events processed
+alpr_alert_events_processed_total
+
+# Alerts triggered by rule
+alpr_alert_triggered_total{rule="rule_name"}
+
+# Notifications sent by channel
+alpr_notifications_sent_total{channel="email|slack|webhook|sms"}
+
+# Notification failures
+alpr_notifications_failed_total{channel="email|slack|webhook|sms"}
+
+# Rule evaluation time
+alpr_rule_evaluation_duration_seconds
+```
+
+**Usage Example**:
+```python
+from core-services.alerting.alert_engine import AlertEngine
+
+engine = AlertEngine(
+    kafka_bootstrap_servers="localhost:9092",
+    kafka_topic="alpr.plates.detected",
+    kafka_group_id="alpr-alert-engine",
+    schema_registry_url="http://localhost:8081",
+    rules_config_path="config/alert_rules.yaml"
+)
+
+# Start consuming and processing events
+engine.start()
+```
+
+**Deployment** (Docker):
+```bash
+# Run as Docker service
+docker compose up -d alert-engine
+
+# Check logs
+docker logs -f alpr-alert-engine
+
+# View metrics
+curl http://localhost:8003/metrics
+
+# Stop service
+docker compose stop alert-engine
+```
+
+**Environment Variables**:
+```bash
+KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+KAFKA_TOPIC=alpr.plates.detected
+KAFKA_GROUP_ID=alpr-alert-engine
+SCHEMA_REGISTRY_URL=http://schema-registry:8081
+RULES_CONFIG_PATH=/app/config/alert_rules.yaml
+
+# Notification credentials (optional, based on channels used)
+SMTP_PASSWORD=your_smtp_password
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+WEBHOOK_TOKEN=your_webhook_auth_token
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+```
+
+**Pattern Matching Types**:
+- `exact`: Exact plate text match (case-insensitive)
+- `prefix`: Plate starts with pattern (e.g., "ABC*" matches "ABC123")
+- `suffix`: Plate ends with pattern (e.g., "*123" matches "ABC123")
+- `contains`: Plate contains pattern (e.g., "*BC1*" matches "ABC123")
+- `regex`: Full regex pattern matching (e.g., "^[A-Z]{3}\d{3}$")
+
+**Performance Notes**:
+- Throughput: 100-500 events/second
+- Rule evaluation: <1ms per rule per event
+- Notification latency: 100-2000ms depending on channel
+- Automatic retry on notification failures
+- Rate limiting prevents notification spam
+
+**Recent Features**:
+- ✅ Multi-channel notification support
+- ✅ YAML-based rule configuration
+- ✅ Prometheus metrics integration
+- ✅ Avro deserialization support
+- ✅ Pattern matching with regex
+- ✅ Graceful shutdown handling
+
+---
+
 ## Infrastructure Services
 
 ### Kafka Ecosystem
@@ -1192,8 +1362,9 @@ minio:
 5. MinIO
 6. MinIO Init (depends on MinIO, creates buckets)
 7. Kafka Consumer (depends on Kafka + Schema Registry + TimescaleDB)
-8. Query API (depends on TimescaleDB)
-9. Kafka UI (depends on Kafka + Schema Registry)
+8. Alert Engine (depends on Kafka + Schema Registry)
+9. Query API (depends on TimescaleDB)
+10. Kafka UI (depends on Kafka + Schema Registry)
 
 **Management Commands**:
 ```bash

@@ -1,31 +1,82 @@
-# OVR-ALPR Main Dependencies
-# For pilot.py and edge processing services
+# ============================================================================
+# OVR-ALPR Edge Processing Dependencies
+# ============================================================================
+# Requirements for pilot.py and edge-services/ modules
+# For core-services (Docker), see individual service requirements.txt files
+# Install: pip3 install -r requirements.txt
+# ============================================================================
 
+# ============================================================================
 # Computer Vision & Deep Learning
-opencv-python>=4.6.0    # OpenCV for image processing
-ultralytics>=8.0.0      # YOLOv11 detection
-torch>=2.0.0            # PyTorch
-torchvision>=0.15.0     # PyTorch vision
-paddlepaddle-gpu>=2.5.0 # PaddleOCR backend (GPU)
-paddleocr>=2.7.0        # OCR engine
+# ============================================================================
+opencv-python>=4.6.0        # OpenCV for image processing and GStreamer support
+ultralytics>=8.0.0          # YOLOv11 detection framework
+torch>=2.0.0                # PyTorch deep learning framework
+torchvision>=0.15.0         # PyTorch vision utilities
+paddlepaddle-gpu>=2.5.0     # PaddleOCR backend (GPU version for Jetson)
+paddleocr>=2.7.0            # OCR engine for license plate recognition
 
-# Tracking
-filterpy>=1.4.5         # Kalman filter for ByteTrack
-lap>=0.4.0              # Linear assignment problem solver
-cython-bbox>=0.1.3      # Fast IoU computation
+# ============================================================================
+# Multi-Object Tracking (ByteTrack)
+# ============================================================================
+filterpy>=1.4.5             # Kalman filter for motion prediction
+lap>=0.4.0                  # Linear assignment problem solver (Hungarian algorithm)
+cython-bbox>=0.1.3          # Fast IoU computation for bounding boxes
+scipy>=1.10.0               # Scientific computing (used by tracking)
 
+# ============================================================================
 # Event Processing & Messaging
-kafka-python>=2.0.2     # Kafka client
-python-Levenshtein>=0.21.0  # Fuzzy string matching
+# ============================================================================
+# Standard Kafka client (JSON serialization)
+kafka-python>=2.0.2         # Apache Kafka Python client
 
+# Confluent Kafka client (Avro serialization with Schema Registry)
+confluent-kafka>=2.3.0      # Confluent Kafka client with Avro support
+avro-python3>=1.10.0        # Apache Avro serialization (if using pure Avro)
+
+# Event processing utilities
+python-Levenshtein>=0.21.0  # Fuzzy string matching for deduplication
+
+# ============================================================================
 # Object Storage
-minio>=7.2.0            # MinIO client for S3-compatible storage
+# ============================================================================
+minio>=7.2.0                # MinIO S3-compatible object storage client
 
-# Utilities
-loguru>=0.7.2           # Logging
-PyYAML>=6.0             # YAML config files
-numpy>=1.24.0           # Numerical computing
-python-dotenv>=1.0.0    # Load .env files
+# ============================================================================
+# Monitoring & Observability
+# ============================================================================
+prometheus-client>=0.19.0   # Prometheus metrics export (pilot.py exposes port 8001)
 
-# Monitoring
-prometheus-client>=0.19.0  # Prometheus metrics
+# ============================================================================
+# Utilities & Configuration
+# ============================================================================
+loguru>=0.7.2               # Advanced logging with colors and formatting
+PyYAML>=6.0                 # YAML configuration file parsing
+numpy>=1.24.0               # Numerical computing (arrays, matrices)
+python-dotenv>=1.0.0        # Load environment variables from .env files
+requests>=2.31.0            # HTTP requests (for API calls, health checks)
+
+# ============================================================================
+# Optional Development Tools (uncomment if needed)
+# ============================================================================
+# pytest>=7.4.0             # Unit testing framework
+# black>=23.0.0             # Code formatter
+# flake8>=6.0.0             # Linting
+# mypy>=1.5.0               # Static type checking
+
+# ============================================================================
+# Platform-Specific Notes
+# ============================================================================
+# NVIDIA Jetson (ARM64):
+# - Use paddlepaddle-gpu (prebuilt for Jetson)
+# - Install torch from NVIDIA JetPack (not PyPI)
+# - OpenCV should be built with GStreamer support for GPU decode
+#
+# x86_64 Linux/Windows:
+# - Use standard PyPI packages
+# - Replace paddlepaddle-gpu with paddlepaddle (CPU) if no GPU
+#
+# macOS:
+# - Replace paddlepaddle-gpu with paddlepaddle (CPU only)
+# - Some packages may need Homebrew dependencies
+# ============================================================================
