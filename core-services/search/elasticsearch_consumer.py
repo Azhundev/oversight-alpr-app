@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Alert Engine for ALPR Events
-Consumes PlateEvent messages from Kafka and sends notifications based on configured rules.
+Elasticsearch Consumer for ALPR Events
+Consumes PlateEvent messages from Kafka and indexes them to OpenSearch.
 """
 
 import os
@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 import json
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from datetime import datetime
 from loguru import logger
 
@@ -25,47 +25,77 @@ except ImportError:
     CONFLUENT_KAFKA_AVAILABLE = False
     logger.warning("confluent-kafka not installed. Run: pip install confluent-kafka[avro]")
 
-# Alert engine components
-from rule_engine import RuleEngine, MatchedRule
-from utils.rate_limiter import RateLimiter
-from utils.retry_handler import RetryHandler
-from notifiers.email_notifier import EmailNotifier
-from notifiers.slack_notifier import SlackNotifier
-from notifiers.webhook_notifier import WebhookNotifier
-from notifiers.sms_notifier import SMSNotifier
+# OpenSearch components
+from opensearch_client import OpenSearchClient
+from index_manager import IndexManager
+from bulk_indexer import BulkIndexer
 
 # Prometheus metrics
 from prometheus_client import Counter, Histogram, Gauge, start_http_server
 
 
-class AlertEngine:
+class ElasticsearchConsumer:
     """
-    Alert Engine for ALPR events with rule-based notifications.
+    Kafka consumer that indexes ALPR events to OpenSearch.
 
-    Consumes Avro-serialized plate detection events from Kafka and sends
-    notifications via Email, Slack, Webhooks, and SMS based on configured rules.
+    Consumes Avro-serialized plate detection events from Kafka and indexes them
+    to OpenSearch with bulk indexing and monthly index rotation.
     """
 
     # Prometheus metrics (class-level for global access)
-    metrics_events_consumed = Counter('alert_engine_events_consumed_total', 'Total events consumed')
-    metrics_rules_matched = Counter('alert_engine_rules_matched_total', 'Rules matched', ['rule_id', 'priority'])
-    metrics_rule_evaluation_time = Histogram('alert_engine_rule_evaluation_time_seconds', 'Rule evaluation time')
-    metrics_alerts_triggered = Counter('alert_engine_alerts_triggered_total', 'Alerts triggered', ['rule_id'])
-    metrics_alerts_rate_limited = Counter('alert_engine_alerts_rate_limited_total', 'Alerts rate-limited', ['rule_id'])
-    metrics_notifications_sent = Counter('alert_engine_notifications_sent_total', 'Notifications sent', ['channel', 'rule_id'])
-    metrics_notifications_failed = Counter('alert_engine_notifications_failed_total', 'Notification failures', ['channel', 'error_type'])
-    metrics_notification_send_time = Histogram('alert_engine_notification_send_time_seconds', 'Notification send time', ['channel'])
-    metrics_retries = Counter('alert_engine_retry_attempts_total', 'Total retry attempts', ['attempt'])
-    metrics_timeouts = Counter('alert_engine_processing_timeout_total', 'Total processing timeouts')
-    metrics_dlq_sent = Counter('alert_engine_dlq_messages_sent_total', 'Total messages sent to DLQ', ['error_type'])
+    metrics_consumed = Counter(
+        'elasticsearch_consumer_messages_consumed_total',
+        'Total messages consumed from Kafka'
+    )
+    metrics_indexed = Counter(
+        'elasticsearch_consumer_messages_indexed_total',
+        'Total messages indexed to OpenSearch'
+    )
+    metrics_failed = Counter(
+        'elasticsearch_consumer_messages_failed_total',
+        'Total messages that failed to index'
+    )
+    metrics_bulk_requests = Counter(
+        'elasticsearch_consumer_bulk_requests_total',
+        'Total bulk requests sent to OpenSearch'
+    )
+    metrics_bulk_size = Histogram(
+        'elasticsearch_consumer_bulk_size_documents',
+        'Number of documents per bulk request'
+    )
+    metrics_bulk_duration = Histogram(
+        'elasticsearch_consumer_bulk_duration_seconds',
+        'Bulk request duration in seconds'
+    )
+    metrics_opensearch_available = Gauge(
+        'elasticsearch_consumer_opensearch_available',
+        'OpenSearch cluster availability (1=up, 0=down)'
+    )
+    metrics_retries = Counter(
+        'elasticsearch_consumer_retry_attempts_total',
+        'Total retry attempts',
+        ['attempt']
+    )
+    metrics_timeouts = Counter(
+        'elasticsearch_consumer_processing_timeout_total',
+        'Total processing timeouts'
+    )
+    metrics_dlq_sent = Counter(
+        'elasticsearch_consumer_dlq_messages_sent_total',
+        'Total messages sent to DLQ',
+        ['error_type']
+    )
 
     def __init__(
         self,
         kafka_bootstrap_servers: str = "localhost:9092",
         schema_registry_url: str = "http://localhost:8081",
         kafka_topic: str = "alpr.events.plates",
-        kafka_group_id: str = "alpr-alert-engine",
-        rules_config_path: str = "/app/config/alert_rules.yaml",
+        kafka_group_id: str = "alpr-elasticsearch-consumer",
+        opensearch_hosts: str = "http://localhost:9200",
+        opensearch_index_prefix: str = "alpr-events",
+        opensearch_bulk_size: int = 50,
+        opensearch_flush_interval: int = 5,
         auto_offset_reset: str = "latest",
         max_retries: int = 3,
         retry_delay_base: float = 2.0,
@@ -74,14 +104,17 @@ class AlertEngine:
         dlq_topic: str = "alpr.dlq",
     ):
         """
-        Initialize Alert Engine.
+        Initialize Elasticsearch Consumer.
 
         Args:
             kafka_bootstrap_servers: Kafka broker addresses
             schema_registry_url: Schema Registry URL
             kafka_topic: Topic to consume from
             kafka_group_id: Consumer group ID
-            rules_config_path: Path to alert_rules.yaml
+            opensearch_hosts: OpenSearch host URLs (comma-separated)
+            opensearch_index_prefix: Prefix for index names
+            opensearch_bulk_size: Documents per bulk request
+            opensearch_flush_interval: Flush interval in seconds
             auto_offset_reset: Offset reset policy (latest, earliest)
             max_retries: Maximum retry attempts before sending to DLQ
             retry_delay_base: Base delay in seconds for exponential backoff
@@ -114,24 +147,44 @@ class AlertEngine:
         # Statistics
         self.stats = {
             'consumed': 0,
-            'rules_matched': 0,
-            'alerts_sent': 0,
-            'alerts_rate_limited': 0,
-            'notifications_sent': 0,
-            'notifications_failed': 0,
+            'indexed': 0,
+            'failed': 0,
+            'skipped': 0,
             'retried': 0,
             'timeout': 0,
             'dlq_sent': 0,
         }
 
-        # Initialize components
-        logger.info(f"Loading alert rules from: {rules_config_path}")
-        self.rule_engine = RuleEngine(rules_config_path)
-        self.rate_limiter = RateLimiter(cleanup_interval=3600)
-        self.retry_handler = RetryHandler(max_attempts=3, initial_delay=5.0)
+        # Initialize OpenSearch client
+        opensearch_host_list = [h.strip() for h in opensearch_hosts.split(',')]
+        self.opensearch_client = OpenSearchClient(
+            hosts=opensearch_host_list,
+            use_ssl=False,
+            verify_certs=False,
+            timeout=30
+        )
 
-        # Initialize notifiers
-        self.notifiers = self._initialize_notifiers()
+        # Check OpenSearch health
+        if self.opensearch_client.is_healthy():
+            self.metrics_opensearch_available.set(1)
+        else:
+            self.metrics_opensearch_available.set(0)
+            logger.warning("⚠️  OpenSearch cluster is not healthy, but continuing...")
+
+        # Initialize index manager
+        self.index_manager = IndexManager(
+            opensearch_client=self.opensearch_client,
+            index_prefix=opensearch_index_prefix
+        )
+
+        # Initialize bulk indexer with metrics callback
+        self.bulk_indexer = BulkIndexer(
+            opensearch_client=self.opensearch_client,
+            index_manager=self.index_manager,
+            batch_size=opensearch_bulk_size,
+            flush_interval=opensearch_flush_interval,
+            metrics_callback=self._bulk_metrics_callback
+        )
 
         # Initialize Schema Registry client
         self.schema_registry_client = SchemaRegistryClient({
@@ -168,45 +221,30 @@ class AlertEngine:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-        # Start Prometheus metrics HTTP server on port 8003
+        # Start Prometheus metrics HTTP server on port 8004
         try:
-            start_http_server(8003)
-            logger.success("✅ Prometheus metrics endpoint started at http://localhost:8003/metrics")
+            start_http_server(8004)
+            logger.success("✅ Prometheus metrics endpoint started at http://localhost:8004/metrics")
         except Exception as e:
             logger.warning(f"⚠️  Failed to start Prometheus metrics server: {e}")
 
-    def _initialize_notifiers(self) -> Dict[str, Any]:
-        """Initialize all notification channels."""
-        notifiers = {}
+    def _bulk_metrics_callback(self, batch_size: int, duration: float, errors: int):
+        """
+        Callback for bulk indexer metrics.
 
-        # Email
-        email_config = self.rule_engine.get_notification_config('email')
-        if email_config:
-            notifiers['email'] = EmailNotifier(email_config)
-            logger.info("✅ Email notifier initialized")
+        Args:
+            batch_size: Number of documents in batch
+            duration: Bulk request duration
+            errors: Number of errors
+        """
+        self.metrics_bulk_requests.inc()
+        self.metrics_bulk_size.observe(batch_size)
+        self.metrics_bulk_duration.observe(duration)
+        self.metrics_indexed.inc(batch_size)
+        self.metrics_failed.inc(errors)
 
-        # Slack
-        slack_config = self.rule_engine.get_notification_config('slack')
-        if slack_config:
-            notifiers['slack'] = SlackNotifier(slack_config)
-            logger.info("✅ Slack notifier initialized")
-
-        # Webhook
-        webhook_config = self.rule_engine.get_notification_config('webhook')
-        if webhook_config:
-            notifiers['webhook'] = WebhookNotifier(webhook_config)
-            logger.info("✅ Webhook notifier initialized")
-
-        # SMS
-        sms_config = self.rule_engine.get_notification_config('sms')
-        if sms_config:
-            notifiers['sms'] = SMSNotifier(sms_config)
-            logger.info("✅ SMS notifier initialized")
-
-        if not notifiers:
-            logger.warning("⚠️  No notification channels enabled!")
-
-        return notifiers
+        self.stats['indexed'] += batch_size
+        self.stats['failed'] += errors
 
     def _connect(self):
         """Establish connection to Kafka broker."""
@@ -217,8 +255,6 @@ class AlertEngine:
                 f"   Schema Registry: {self.schema_registry_url}\n"
                 f"   Group ID: {self.config['group.id']}"
             )
-            self.consumer.subscribe([self.kafka_topic])
-            logger.success(f"✅ Subscribed to topic: {self.kafka_topic}")
         except Exception as e:
             logger.error(f"❌ Failed to connect to Kafka: {e}")
             raise
@@ -358,8 +394,8 @@ class AlertEngine:
                     )
                     return False
 
-                # Attempt to process event (rule evaluation + notifications)
-                self._process_event(event_data)
+                # Attempt to index event to OpenSearch
+                self.bulk_indexer.add(event_data)
 
                 if attempt > 0:
                     logger.info(f"✅ Succeeded on retry attempt {attempt + 1}/{self.max_retries}")
@@ -400,25 +436,33 @@ class AlertEngine:
 
         return False
 
-    def _signal_handler(self, sig, frame):
+    def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully."""
-        logger.info(f"\n🛑 Received signal {sig}, shutting down gracefully...")
+        logger.warning(f"🛑 Received signal {signum}, shutting down gracefully...")
         self.running = False
 
-    def consume(self, timeout: float = 1.0):
+    def start(self):
         """
-        Start consuming messages and processing alerts.
+        Start consuming messages from Kafka and indexing to OpenSearch.
 
-        Args:
-            timeout: Poll timeout in seconds
+        This is a blocking operation that runs until stopped.
         """
-        self.running = True
-        logger.info("🚀 Alert Engine started, waiting for events...")
-
         try:
+            # Subscribe to topic
+            self.consumer.subscribe([self.kafka_topic])
+            logger.success(f"📥 Subscribed to topic: {self.kafka_topic}")
+
+            # Ensure current month's index exists
+            current_index = self.index_manager.ensure_current_index_exists()
+            logger.success(f"📑 Using index: {current_index}")
+
+            self.running = True
+            logger.info("🚀 Starting message consumption and indexing...")
+
             while self.running:
                 try:
-                    msg = self.consumer.poll(timeout=timeout)
+                    # Poll for messages
+                    msg = self.consumer.poll(timeout=1.0)
 
                     if msg is None:
                         continue
@@ -427,187 +471,124 @@ class AlertEngine:
                         logger.error(f"❌ Consumer error: {msg.error()}")
                         continue
 
-                    # Process event with retry logic
-                    event = msg.value()
-                    if event:
-                        self.metrics_events_consumed.inc()
-                        self.stats['consumed'] += 1
+                    # Deserialize event
+                    event_data = msg.value()
+                    self.stats['consumed'] += 1
+                    self.metrics_consumed.inc()
 
-                        # Process with retry and timeout detection
-                        success = self._process_with_retry(msg, event)
+                    if event_data is None:
+                        logger.warning("⚠️  Received null message, skipping")
+                        self.stats['skipped'] += 1
+                        continue
 
-                        if not success:
-                            # Error logging and DLQ handling already done in _process_with_retry
-                            pass
-                    else:
-                        logger.warning("⚠️  Received null event, skipping")
+                    # Log event details
+                    event_id = event_data.get('event_id', 'unknown')
+                    plate_text = event_data.get('plate', {}).get('normalized_text', 'unknown')
+                    camera_id = event_data.get('camera_id', 'unknown')
+
+                    logger.debug(
+                        f"📨 Consumed: event_id={event_id}, "
+                        f"plate={plate_text}, camera={camera_id}"
+                    )
+
+                    # Process with retry and timeout detection
+                    success = self._process_with_retry(msg, event_data)
+
+                    if not success:
+                        # Error logging and DLQ handling already done in _process_with_retry
+                        pass
+
+                    # Log stats every 100 messages
+                    if self.stats['consumed'] % 100 == 0:
+                        self._log_stats()
+
+                    # Periodically check OpenSearch health
+                    if self.stats['consumed'] % 500 == 0:
+                        if self.opensearch_client.is_healthy():
+                            self.metrics_opensearch_available.set(1)
+                        else:
+                            self.metrics_opensearch_available.set(0)
 
                 except KeyboardInterrupt:
-                    logger.info("⏸️  Interrupted by user")
+                    logger.warning("⏸️  Interrupted by user")
+                    self.running = False
                     break
                 except Exception as e:
                     logger.error(f"❌ Error processing message: {e}", exc_info=True)
+                    self.stats['failed'] += 1
+                    self.metrics_failed.inc()
                     continue
 
-        finally:
-            self._shutdown()
-
-    def _process_event(self, event: Dict):
-        """
-        Process a single event through the alert pipeline.
-
-        Args:
-            event: PlateEvent data (dict)
-        """
-        start_time = time.time()
-
-        try:
-            # Evaluate rules
-            matched_rules = self.rule_engine.evaluate(event)
-
-            if not matched_rules:
-                return  # No rules matched
-
-            # Process each matched rule
-            for matched_rule in matched_rules:
-                self.metrics_rules_matched.labels(
-                    rule_id=matched_rule.rule_id,
-                    priority=matched_rule.priority
-                ).inc()
-                self.stats['rules_matched'] += 1
-
-                # Check rate limiting
-                if not self._check_rate_limit(matched_rule):
-                    self.metrics_alerts_rate_limited.labels(rule_id=matched_rule.rule_id).inc()
-                    self.stats['alerts_rate_limited'] += 1
-                    continue
-
-                # Send notifications
-                self._send_notifications(matched_rule)
-                self.metrics_alerts_triggered.labels(rule_id=matched_rule.rule_id).inc()
-                self.stats['alerts_sent'] += 1
-
         except Exception as e:
-            logger.error(f"Error processing event: {e}", exc_info=True)
+            logger.error(f"❌ Consumer error: {e}", exc_info=True)
+            raise
         finally:
-            # Record processing time
-            elapsed = time.time() - start_time
-            self.metrics_rule_evaluation_time.observe(elapsed)
+            self.stop()
 
-    def _check_rate_limit(self, matched_rule: MatchedRule) -> bool:
-        """Check if alert should be rate-limited."""
-        rate_limit_config = matched_rule.rate_limit_config
+    def stop(self):
+        """Stop consumer and cleanup."""
+        logger.info("🛑 Stopping Elasticsearch Consumer...")
 
-        if not rate_limit_config.get('enabled', True):
-            return True  # Rate limiting disabled for this rule
+        # Flush any pending documents
+        if self.bulk_indexer:
+            pending = self.bulk_indexer.pending_count()
+            if pending > 0:
+                logger.info(f"Flushing {pending} pending documents...")
+                self.bulk_indexer.flush_now()
 
-        cooldown_seconds = rate_limit_config.get('cooldown_seconds', 300)
-        dedup_key = rate_limit_config.get('dedup_key', 'plate.normalized_text')
-
-        should_alert = self.rate_limiter.should_alert(
-            rule_id=matched_rule.rule_id,
-            event=matched_rule.event_data,
-            cooldown_seconds=cooldown_seconds,
-            dedup_key=dedup_key
-        )
-
-        return should_alert
-
-    def _send_notifications(self, matched_rule: MatchedRule):
-        """Send notifications to all configured channels for this rule."""
-        # Format message
-        message = matched_rule.message_template
-        for notifier_cls in self.notifiers.values():
-            if hasattr(notifier_cls, 'format_message'):
-                message = notifier_cls.format_message(
-                    matched_rule.message_template,
-                    matched_rule.event_data
-                )
-                break
-
-        # Prepare alert data
-        alert_data = {
-            'rule_id': matched_rule.rule_id,
-            'rule_name': matched_rule.rule_name,
-            'priority': matched_rule.priority,
-            'message': message,
-            'event': matched_rule.event_data
-        }
-
-        # Send to each configured channel
-        for channel in matched_rule.notify_channels:
-            if channel not in self.notifiers:
-                logger.warning(f"Channel '{channel}' not available, skipping")
-                continue
-
-            notifier = self.notifiers[channel]
-            if not notifier.is_enabled():
-                logger.debug(f"Channel '{channel}' is disabled, skipping")
-                continue
-
-            # Send with retry
-            self._send_with_retry(channel, notifier, alert_data, matched_rule.rule_id)
-
-    def _send_with_retry(self, channel: str, notifier: Any, alert_data: Dict, rule_id: str):
-        """Send notification with retry logic."""
-        start_time = time.time()
-
-        try:
-            # Wrap send in retry handler
-            success, error = self.retry_handler.execute_with_retry(
-                notifier.send,
-                alert_data
-            )
-
-            # Record metrics
-            elapsed = time.time() - start_time
-            self.metrics_notification_send_time.labels(channel=channel).observe(elapsed)
-
-            if success:
-                self.metrics_notifications_sent.labels(channel=channel, rule_id=rule_id).inc()
-                self.stats['notifications_sent'] += 1
-                logger.success(f"✅ Notification sent via {channel} for rule: {rule_id}")
-            else:
-                error_type = type(error).__name__ if error else 'unknown'
-                self.metrics_notifications_failed.labels(channel=channel, error_type=error_type).inc()
-                self.stats['notifications_failed'] += 1
-                logger.error(f"❌ Failed to send notification via {channel} for rule: {rule_id}")
-
-        except Exception as e:
-            logger.error(f"Unexpected error sending notification via {channel}: {e}", exc_info=True)
-            self.metrics_notifications_failed.labels(channel=channel, error_type='unexpected').inc()
-            self.stats['notifications_failed'] += 1
-
-    def _shutdown(self):
-        """Clean shutdown of alert engine."""
-        logger.info("🛑 Shutting down Alert Engine...")
-
+        # Close Kafka consumer
         if self.consumer:
             try:
                 self.consumer.close()
-                logger.success("✅ Kafka consumer closed")
+                logger.info("Kafka consumer closed")
             except Exception as e:
-                logger.error(f"Error closing consumer: {e}")
+                logger.warning(f"Error closing Kafka consumer: {e}")
 
-        # Print final stats
+        # Close OpenSearch client
+        if self.opensearch_client:
+            self.opensearch_client.close()
+
+        # Log final stats
+        self._log_stats()
+
+        # Log bulk indexer stats
+        bulk_stats = self.bulk_indexer.get_stats()
         logger.info(
-            f"\n📊 Final Statistics:\n"
-            f"   Events Consumed:      {self.stats['consumed']}\n"
-            f"   Rules Matched:        {self.stats['rules_matched']}\n"
-            f"   Alerts Sent:          {self.stats['alerts_sent']}\n"
-            f"   Alerts Rate Limited:  {self.stats['alerts_rate_limited']}\n"
-            f"   Notifications Sent:   {self.stats['notifications_sent']}\n"
-            f"   Notifications Failed: {self.stats['notifications_failed']}\n"
-            f"   Retried:              {self.stats['retried']}\n"
-            f"   Timeout:              {self.stats['timeout']}\n"
-            f"   DLQ Sent:             {self.stats['dlq_sent']}"
+            f"\n📊 Bulk Indexer Stats:\n"
+            f"   Documents Added:   {bulk_stats['documents_added']}\n"
+            f"   Documents Indexed: {bulk_stats['documents_indexed']}\n"
+            f"   Documents Failed:  {bulk_stats['documents_failed']}\n"
+            f"   Batches Flushed:   {bulk_stats['batches_flushed']}\n"
+            f"   Bulk Errors:       {bulk_stats['bulk_errors']}"
         )
 
-        logger.success("✅ Alert Engine shutdown complete")
+        logger.success("✅ Consumer stopped gracefully")
+
+    def _log_stats(self):
+        """Log consumer statistics."""
+        logger.info(
+            f"📊 Stats: consumed={self.stats['consumed']}, "
+            f"indexed={self.stats['indexed']}, "
+            f"failed={self.stats['failed']}, "
+            f"skipped={self.stats['skipped']}, "
+            f"retried={self.stats['retried']}, "
+            f"timeout={self.stats['timeout']}, "
+            f"dlq_sent={self.stats['dlq_sent']}, "
+            f"pending={self.bulk_indexer.pending_count()}"
+        )
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get consumer statistics."""
+        return {
+            **self.stats,
+            'kafka_topic': self.kafka_topic,
+            'running': self.running,
+            'bulk_indexer_stats': self.bulk_indexer.get_stats(),
+        }
 
 
 def main():
-    """Main entry point."""
+    """Main entry point for Elasticsearch Consumer."""
     # Configure logging
     logger.remove()
     logger.add(
@@ -616,19 +597,24 @@ def main():
         level="INFO"
     )
     logger.add(
-        "/app/logs/alert_engine.log",
+        "/app/logs/elasticsearch_consumer.log",
         rotation="100 MB",
         retention="30 days",
         level="DEBUG"
     )
 
-    # Get configuration from environment
-    kafka_bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-    schema_registry = os.getenv("SCHEMA_REGISTRY_URL", "http://localhost:8081")
-    kafka_topic = os.getenv("KAFKA_TOPIC", "alpr.events.plates")
-    kafka_group = os.getenv("KAFKA_GROUP_ID", "alpr-alert-engine")
-    rules_config = os.getenv("RULES_CONFIG_PATH", "/app/config/alert_rules.yaml")
-    auto_offset = os.getenv("AUTO_OFFSET_RESET", "latest")
+    # Get configuration from environment variables
+    kafka_servers = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+    schema_registry_url = os.getenv('SCHEMA_REGISTRY_URL', 'http://localhost:8081')
+    kafka_topic = os.getenv('KAFKA_TOPIC', 'alpr.events.plates')
+    kafka_group_id = os.getenv('KAFKA_GROUP_ID', 'alpr-elasticsearch-consumer')
+
+    opensearch_hosts = os.getenv('OPENSEARCH_HOSTS', 'http://localhost:9200')
+    opensearch_index_prefix = os.getenv('OPENSEARCH_INDEX_PREFIX', 'alpr-events')
+    opensearch_bulk_size = int(os.getenv('OPENSEARCH_BULK_SIZE', '50'))
+    opensearch_flush_interval = int(os.getenv('OPENSEARCH_FLUSH_INTERVAL', '5'))
+
+    auto_offset_reset = os.getenv('AUTO_OFFSET_RESET', 'latest')
 
     # DLQ and retry configuration
     max_retries = int(os.getenv('MAX_RETRIES', '3'))
@@ -637,26 +623,37 @@ def main():
     enable_dlq = os.getenv('ENABLE_DLQ', 'true').lower() == 'true'
     dlq_topic = os.getenv('DLQ_TOPIC', 'alpr.dlq')
 
-    logger.info("🚀 Starting ALPR Alert Engine (with DLQ & Retry)...")
-    logger.info(f"   Kafka: {kafka_bootstrap}")
-    logger.info(f"   Schema Registry: {schema_registry}")
-    logger.info(f"   Topic: {kafka_topic}")
-    logger.info(f"   Rules: {rules_config}")
-    logger.info(f"   Max Retries: {max_retries}")
-    logger.info(f"   Retry Delay Base: {retry_delay_base}s")
-    logger.info(f"   Processing Timeout: {processing_timeout}s")
-    logger.info(f"   DLQ Enabled: {enable_dlq}")
-    logger.info(f"   DLQ Topic: {dlq_topic}")
+    logger.info("=" * 70)
+    logger.info("🚀 ALPR Elasticsearch Consumer (with DLQ & Retry)")
+    logger.info("=" * 70)
+    logger.info(f"Kafka Servers: {kafka_servers}")
+    logger.info(f"Schema Registry: {schema_registry_url}")
+    logger.info(f"Topic: {kafka_topic}")
+    logger.info(f"Group ID: {kafka_group_id}")
+    logger.info(f"OpenSearch: {opensearch_hosts}")
+    logger.info(f"Index Prefix: {opensearch_index_prefix}")
+    logger.info(f"Bulk Size: {opensearch_bulk_size}")
+    logger.info(f"Flush Interval: {opensearch_flush_interval}s")
+    logger.info(f"Auto Offset Reset: {auto_offset_reset}")
+    logger.info(f"Max Retries: {max_retries}")
+    logger.info(f"Retry Delay Base: {retry_delay_base}s")
+    logger.info(f"Processing Timeout: {processing_timeout}s")
+    logger.info(f"DLQ Enabled: {enable_dlq}")
+    logger.info(f"DLQ Topic: {dlq_topic}")
+    logger.info("=" * 70)
 
+    # Create and start consumer
     try:
-        # Create and run alert engine
-        engine = AlertEngine(
-            kafka_bootstrap_servers=kafka_bootstrap,
-            schema_registry_url=schema_registry,
+        consumer = ElasticsearchConsumer(
+            kafka_bootstrap_servers=kafka_servers,
+            schema_registry_url=schema_registry_url,
             kafka_topic=kafka_topic,
-            kafka_group_id=kafka_group,
-            rules_config_path=rules_config,
-            auto_offset_reset=auto_offset,
+            kafka_group_id=kafka_group_id,
+            opensearch_hosts=opensearch_hosts,
+            opensearch_index_prefix=opensearch_index_prefix,
+            opensearch_bulk_size=opensearch_bulk_size,
+            opensearch_flush_interval=opensearch_flush_interval,
+            auto_offset_reset=auto_offset_reset,
             max_retries=max_retries,
             retry_delay_base=retry_delay_base,
             processing_timeout=processing_timeout,
@@ -664,10 +661,10 @@ def main():
             dlq_topic=dlq_topic,
         )
 
-        engine.consume()
+        consumer.start()
 
     except Exception as e:
-        logger.error(f"❌ Fatal error: {e}", exc_info=True)
+        logger.error(f"❌ Consumer failed: {e}", exc_info=True)
         sys.exit(1)
 
 

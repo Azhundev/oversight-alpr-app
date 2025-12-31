@@ -139,7 +139,7 @@ services:
     environment:
       # Kafka configuration
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      KAFKA_TOPIC: alpr.plates.detected
+      KAFKA_TOPIC: alpr.events.plates
       KAFKA_GROUP_ID: alpr-storage-consumer
       # Schema Registry configuration
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
@@ -150,6 +150,12 @@ services:
       DB_NAME: alpr_db
       DB_USER: alpr
       DB_PASSWORD: alpr_secure_pass
+      # DLQ and Retry configuration
+      MAX_RETRIES: "3"
+      RETRY_DELAY_BASE: "2.0"
+      PROCESSING_TIMEOUT: "30.0"
+      ENABLE_DLQ: "true"
+      DLQ_TOPIC: alpr.dlq
     volumes:
       - ./logs:/app/logs
     networks:
@@ -172,12 +178,18 @@ services:
     environment:
       # Kafka configuration
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      KAFKA_TOPIC: alpr.plates.detected
+      KAFKA_TOPIC: alpr.events.plates
       KAFKA_GROUP_ID: alpr-alert-engine
       # Schema Registry configuration
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       # Rules configuration
       RULES_CONFIG_PATH: /app/config/alert_rules.yaml
+      # DLQ and Retry configuration
+      MAX_RETRIES: "3"
+      RETRY_DELAY_BASE: "2.0"
+      PROCESSING_TIMEOUT: "30.0"
+      ENABLE_DLQ: "true"
+      DLQ_TOPIC: alpr.dlq
       # Notification secrets (set in .env file or pass via environment)
       SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
       SLACK_WEBHOOK_URL: "${SLACK_WEBHOOK_URL:-}"
@@ -253,6 +265,8 @@ services:
       MINIO_ACCESS_KEY: alpr_minio
       MINIO_SECRET_KEY: alpr_minio_secure_pass_2024
       MINIO_BUCKET: alpr-plate-images
+      # OpenSearch configuration
+      OPENSEARCH_HOSTS: http://opensearch:9200
     networks:
       - alpr-network
     restart: unless-stopped
@@ -388,6 +402,141 @@ services:
       - '--docker_only=true'
       - '--disable_metrics=percpu,sched,tcp,udp,disk,diskIO,hugetlb,referenced_memory,cpu_topology,resctrl'
 
+  # ============================================================================
+  # SEARCH & ANALYTICS
+  # ============================================================================
+
+  # OpenSearch - Full-text search and analytics engine
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: alpr-opensearch
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx1g"  # Critical for Jetson
+      bootstrap.memory_lock: "false"
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    networks:
+      - alpr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # OpenSearch Dashboards - Web UI for OpenSearch (optional)
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.11.0
+    container_name: alpr-opensearch-dashboards
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    ports:
+      - "5601:5601"
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    networks:
+      - alpr-network
+    restart: unless-stopped
+    profiles:
+      - analytics  # Only start with: docker compose --profile analytics up
+
+  # Elasticsearch Consumer - Kafka consumer that indexes events to OpenSearch
+  elasticsearch-consumer:
+    build:
+      context: .
+      dockerfile: core-services/search/Dockerfile
+    container_name: alpr-elasticsearch-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    ports:
+      - "8004:8004"  # Prometheus metrics
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: alpr.events.plates
+      KAFKA_GROUP_ID: alpr-elasticsearch-consumer
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      OPENSEARCH_HOSTS: http://opensearch:9200
+      OPENSEARCH_INDEX_PREFIX: alpr-events
+      OPENSEARCH_BULK_SIZE: "50"
+      OPENSEARCH_FLUSH_INTERVAL: "5"
+      AUTO_OFFSET_RESET: latest
+      # DLQ and Retry configuration
+      MAX_RETRIES: "3"
+      RETRY_DELAY_BASE: "2.0"
+      PROCESSING_TIMEOUT: "30.0"
+      ENABLE_DLQ: "true"
+      DLQ_TOPIC: alpr.dlq
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - alpr-network
+    restart: unless-stopped
+
+  # DLQ Consumer - Monitors dead letter queue for failed messages
+  dlq-consumer:
+    build:
+      context: .
+      dockerfile: core-services/dlq/Dockerfile
+    container_name: alpr-dlq-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    ports:
+      - "8005:8005"  # Prometheus metrics
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: alpr.dlq
+      KAFKA_GROUP_ID: alpr-dlq-consumer
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      AUTO_OFFSET_RESET: earliest  # Process all DLQ messages from beginning
+      METRICS_PORT: "8005"
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - alpr-network
+    restart: unless-stopped
+
+  # Metrics Consumer - Consumes system metrics from Kafka and exposes for Prometheus
+  metrics-consumer:
+    build:
+      context: .
+      dockerfile: core-services/metrics/Dockerfile
+    container_name: alpr-metrics-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    ports:
+      - "8006:8006"  # Prometheus metrics
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: alpr.metrics
+      KAFKA_GROUP_ID: alpr-metrics-consumer
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      AUTO_OFFSET_RESET: latest  # Only consume new metrics
+      METRICS_PORT: "8006"
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - alpr-network
+    restart: unless-stopped
+
 volumes:
   # Data persistence volumes
   zookeeper-data:
@@ -407,6 +556,10 @@ volumes:
   grafana-data:
     driver: local
   loki-data:
+    driver: local
+
+  # Search & analytics volumes
+  opensearch-data:
     driver: local
 
 networks:

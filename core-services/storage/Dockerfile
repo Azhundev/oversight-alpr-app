@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 COPY core-services/storage/ ./services/storage/
 COPY core-services/api/ ./services/api/
 COPY shared/ ./shared/
+COPY schemas/ ./schemas/
 
 # Set Python path
 ENV PYTHONPATH=/app

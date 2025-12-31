@@ -1,6 +1,6 @@
 # OVR-ALPR System Architecture - Mermaid Chart
 
-**Last Updated:** 2025-12-25
+**Last Updated:** 2025-12-29
 
 This document contains the Mermaid chart visualization of the complete OVR-ALPR system architecture based on the current implementation status.
 
@@ -41,13 +41,22 @@ flowchart TB
             MINIO["📦 MinIO<br/>✅ PRODUCTION<br/>S3-compatible<br/>90-day retention"]
         end
 
+        subgraph "Search Layer"
+            ESCONS["🔎 Elasticsearch Consumer<br/>✅ PRODUCTION<br/>Bulk indexing<br/>100+ events/s"]
+            OPENSEARCH["🔍 OpenSearch 2.11.0<br/>✅ PRODUCTION<br/>Full-text search<br/>Sub-100ms latency"]
+        end
+
+        subgraph "Alert Layer"
+            ALERT["🚨 Alert Engine<br/>✅ PRODUCTION<br/>4 channels<br/>Email/Slack/SMS/Webhook"]
+        end
+
         subgraph "API Layer"
-            API["🌐 Query API<br/>✅ PRODUCTION<br/>FastAPI + OpenAPI<br/>50-100 req/s"]
+            API["🌐 Query API<br/>✅ PRODUCTION<br/>FastAPI + OpenAPI<br/>SQL + Search endpoints"]
         end
 
         subgraph "Monitoring Stack"
             PROM["📊 Prometheus<br/>✅ PRODUCTION<br/>Metrics collection<br/>30-day retention"]
-            GRAF["📈 Grafana<br/>✅ PRODUCTION<br/>4 Dashboards<br/>localhost:3000"]
+            GRAF["📈 Grafana<br/>✅ PRODUCTION<br/>5 Dashboards<br/>localhost:3000"]
             LOKI["📝 Loki<br/>✅ PRODUCTION<br/>Log aggregation<br/>7-day retention"]
             PTAIL["🚚 Promtail<br/>✅ PRODUCTION<br/>Log shipping"]
             CADV["📦 cAdvisor<br/>✅ PRODUCTION<br/>Container metrics<br/>localhost:8082"]
@@ -86,14 +95,24 @@ flowchart TB
     ZK -.->|"Coordinate"| KAFKA
     SR -.->|"Validate"| KAFKA
     KAFKA -->|"Avro messages"| CONS
+    KAFKA -->|"Avro messages"| ESCONS
+    KAFKA -->|"Avro messages"| ALERT
 
     %% Storage Flow
     CONS -->|"Event Dict"| STORE
     STORE -->|"SQL INSERT"| TSDB
     IMG -->|"S3 PUT<br/>async"| MINIO
 
+    %% Search Flow
+    ESCONS -->|"Bulk index"| OPENSEARCH
+    SR -.->|"Schema lookup"| ESCONS
+
+    %% Alert Flow
+    SR -.->|"Schema lookup"| ALERT
+
     %% Query Flow
     API <-->|"SQL SELECT"| TSDB
+    API <-->|"Search query"| OPENSEARCH
     API <-->|"S3 GET"| MINIO
     CLIENT <-->|"HTTP/REST"| API
 
@@ -106,6 +125,8 @@ flowchart TB
     %% Monitoring Flow
     PROM -.->|"Scrape"| PUB
     PROM -.->|"Scrape"| CONS
+    PROM -.->|"Scrape"| ESCONS
+    PROM -.->|"Scrape"| ALERT
     PROM -.->|"Scrape"| API
     PROM -.->|"Scrape"| CADV
     GRAF -.->|"Query"| PROM
@@ -120,7 +141,7 @@ flowchart TB
     classDef schema fill:#E6E6FA,stroke:#9370DB,stroke-width:2px,color:#000
     classDef client fill:#87CEEB,stroke:#4682B4,stroke-width:2px,color:#000
 
-    class CAM,DET,TRK,OCR,EVT,PUB,IMG,ZK,KAFKA,SR,UI,CONS,STORE,TSDB,MINIO,API,PROM,GRAF,LOKI,PTAIL,CADV production
+    class CAM,DET,TRK,OCR,EVT,PUB,IMG,ZK,KAFKA,SR,UI,CONS,STORE,TSDB,MINIO,ESCONS,OPENSEARCH,ALERT,API,PROM,GRAF,LOKI,PTAIL,CADV production
     class CFG1,CFG2,CFG3 config
     class SCHEMA schema
     class CLIENT,ADMIN client
@@ -132,9 +153,9 @@ flowchart TB
 
 ```mermaid
 pie title "Implementation Status (By Component Count)"
-    "Fully Implemented (Production)" : 20
+    "Fully Implemented (Production)" : 25
     "Partially Implemented" : 2
-    "Not Implemented" : 5
+    "Not Implemented" : 3
 ```
 
 ---
@@ -152,7 +173,7 @@ graph LR
         E6["Kafka Publisher ✅"]
     end
 
-    subgraph "Backend Services (7)"
+    subgraph "Backend Services (10)"
         B1["Kafka Broker ✅"]
         B2["Schema Registry ✅"]
         B3["Kafka Consumer ✅"]
@@ -160,6 +181,9 @@ graph LR
         B5["TimescaleDB ✅"]
         B6["Query API ✅"]
         B7["MinIO ✅"]
+        B8["Alert Engine ✅"]
+        B9["Elasticsearch Consumer ✅"]
+        B10["OpenSearch ✅"]
     end
 
     subgraph "Monitoring Services (5)"
@@ -178,12 +202,19 @@ graph LR
 
     E1 --> E2 --> E3 --> E4 --> E5 --> E6
     E6 --> B1 --> B3 --> B4 --> B5
+    B1 --> B8
+    B1 --> B9 --> B10
     B3 -.-> B2
+    B9 -.-> B2
+    B8 -.-> B2
     B5 <--> B6
+    B10 <--> B6
     B7 -.-> B6
     M1 -.-> E6
     M1 -.-> B3
     M1 -.-> B6
+    M1 -.-> B8
+    M1 -.-> B9
     M1 -.-> M5
     M2 -.-> M1
     M2 -.-> M3
@@ -258,8 +289,10 @@ graph TB
         B3["Storage: 500-1k ins/s"]
         B4["Query API: 50-100 req/s"]
         B5["TimescaleDB: 1k+ writes/s"]
-        B6["Total RAM: 2-3GB"]
-        B7["Total CPU: ~30%"]
+        B6["OpenSearch: 100+ docs/s, <100ms search"]
+        B7["Alert Engine: 100+ evt/s"]
+        B8["Total RAM: ~14GB"]
+        B9["Total CPU: ~60%"]
     end
 
     style P1 fill:#90EE90
@@ -293,12 +326,12 @@ gantt
 
     section Phase 3: Production
     Monitoring Stack           :done, p3a, 2025-12-26, 1d
-    Alert Engine               :active, p3b, 2025-12-27, 14d
-    BI Dashboards              :p3c, 2026-01-10, 7d
+    Alert Engine               :done, p3b, 2025-12-27, 2d
 
     section Phase 4: Enterprise
-    Elasticsearch              :p4a, 2026-01-23, 14d
-    Advanced BI                :p4b, 2026-02-06, 14d
+    OpenSearch Integration     :done, p4a, 2025-12-28, 2d
+    Multi-Topic Kafka          :p4b, 2026-01-15, 7d
+    Advanced BI                :p4c, 2026-01-22, 14d
 
     section Phase 5: Scale
     DeepStream Migration       :p5a, 2026-02-20, 42d
@@ -331,10 +364,14 @@ mindmap
       TimescaleDB 2.13
       PostgreSQL 16
       MinIO (S3-compatible)
+      OpenSearch 2.11.0
     API
       FastAPI
       Uvicorn
       Pydantic
+    Alerting
+      Custom Alert Engine
+      SMTP, Slack, Twilio
     Infrastructure
       Docker 24.x
       Docker 24.x
@@ -363,12 +400,12 @@ graph LR
         C5["Single Kafka topic"]
     end
 
-    subgraph "Phase 3 Goals 🎯"
+    subgraph "Phase 3 & 4 Achievements ✅"
         G1["Prometheus metrics ✅"]
-        G2["Grafana dashboards ✅"]
-        G3["Real-time alerts 🔄"]
-        G4["Watchlist matching"]
-        G5["Multi-topic architecture"]
+        G2["Grafana dashboards (5) ✅"]
+        G3["Real-time alerts ✅"]
+        G4["Full-text search ✅"]
+        G5["Dual storage (SQL+NoSQL) ✅"]
     end
 
     subgraph "Phase 5 Vision 🚀"
@@ -411,8 +448,8 @@ graph TB
 
     subgraph "Resource Usage"
         RES1["Jetson: 40-60% CPU, 30-50% GPU"]
-        RES2["Backend: 2-3GB RAM, ~30% CPU"]
-        RES3["Total: 4-6GB RAM recommended"]
+        RES2["Backend: ~14GB RAM, ~60% CPU"]
+        RES3["Total: 16-20GB RAM recommended"]
     end
 
     style CAP1 fill:#90EE90
@@ -432,9 +469,9 @@ graph TB
   - 🔴 = Critical Gap
   - 🟢 = Working Well
 
-- **Overall Completion:** 75% of original vision (100% of core features, 90% of Phase 3)
-- **Current Phase:** Phase 3 (Production Essentials - Monitoring Stack Complete)
-- **Next Phase:** Phase 3 Completion (Alert Engine & BI Integration)
+- **Overall Completion:** 85% of original vision (100% of core features, 100% of Phase 3, Phase 4 Priority 5 complete)
+- **Current Phase:** Phase 4 (Enterprise Features - OpenSearch Integration Complete)
+- **Next Phase:** Phase 4 Remaining (Multi-Topic Kafka, Advanced BI)
 
 ---
 
@@ -442,5 +479,7 @@ graph TB
 
 - [Project_Status.md](Project_Status.md) - Detailed implementation status
 - [SERVICES_OVERVIEW.md](SERVICES_OVERVIEW.md) - Complete service reference
+- [OpenSearch_Integration.md](OpenSearch_Integration.md) - OpenSearch integration guide
 - [ALPR_Next_Steps.md](ALPR_Next_Steps.md) - Detailed roadmap
 - [PIPELINE_COMPARISON.md](PIPELINE_COMPARISON.md) - Architecture comparisons
+- [port-reference.md](port-reference.md) - Port allocation reference

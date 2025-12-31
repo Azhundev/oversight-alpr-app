@@ -15,10 +15,15 @@ Complete reference of all ports used by the ALPR pipeline components.
 | TimescaleDB | 5432 | 5432 | TCP | PostgreSQL database | - |
 | MinIO API | 9000 | 9000 | HTTP/S3 | Object storage API | http://localhost:9000 |
 | MinIO Console | 9001 | 9001 | HTTP | MinIO web UI | http://localhost:9001 |
+| OpenSearch | 9200 | 9200 | HTTP | Search engine API | http://localhost:9200 |
+| OpenSearch (Internal) | 9600 | 9600 | TCP | OpenSearch internal comm | - |
 | **Application Services** |
 | Query API | 8000 | 8000 | HTTP | REST API for queries | http://localhost:8000 |
 | Query API Metrics | 8000 | 8000 | HTTP | Prometheus metrics | http://localhost:8000/metrics |
 | Alert Engine | 8003 | 8003 | HTTP | Real-time alert processing | http://localhost:8003/metrics |
+| Elasticsearch Consumer | 8004 | 8004 | HTTP | Search indexing metrics | http://localhost:8004/metrics |
+| DLQ Consumer | 8005 | 8005 | HTTP | Dead Letter Queue monitor | http://localhost:8005/metrics |
+| Metrics Consumer | 8006 | 8006 | HTTP | System metrics aggregation | http://localhost:8006/metrics |
 | Kafka Consumer Metrics | 8002 | - | HTTP | Prometheus metrics (internal) | - |
 | ALPR Pilot Metrics | - | 8001 | HTTP | Edge processing metrics | http://localhost:8001/metrics |
 | **Monitoring Stack** |
@@ -30,12 +35,14 @@ Complete reference of all ports used by the ALPR pipeline components.
 
 ## Port Groups
 
-### Core Data Infrastructure (Ports 2181, 5432, 9000-9001, 9092, 9101)
+### Core Data Infrastructure (Ports 2181, 5432, 9000-9001, 9092, 9101, 9200, 9600)
 Critical services that handle data storage and messaging:
 - **ZooKeeper (2181)**: Kafka cluster coordination
 - **Kafka (9092)**: Message broker for plate detection events
 - **Kafka JMX (9101)**: Kafka performance monitoring
-- **TimescaleDB (5432)**: Time-series database for plate records
+- **TimescaleDB (5432)**: Time-series database for plate records (SQL)
+- **OpenSearch (9200)**: Search engine for full-text search and analytics (NoSQL)
+- **OpenSearch Internal (9600)**: OpenSearch cluster communication
 - **MinIO API (9000)**: S3-compatible storage for plate images
 - **MinIO Console (9001)**: Web interface for MinIO management
 
@@ -44,11 +51,14 @@ Services for schema management and monitoring:
 - **Schema Registry (8081)**: Avro schema versioning
 - **Kafka UI (8080)**: Kafka cluster management and monitoring
 
-### Application Layer (Ports 8000-8003)
+### Application Layer (Ports 8000-8006)
 ALPR application services:
-- **Query API (8000)**: REST API + Prometheus metrics
+- **Query API (8000)**: REST API (SQL + Search endpoints) + Prometheus metrics
 - **Alert Engine (8003)**: Real-time notification engine + metrics
-- **Kafka Consumer (8002)**: Internal metrics endpoint
+- **Elasticsearch Consumer (8004)**: Search indexing service + metrics
+- **DLQ Consumer (8005)**: Dead Letter Queue monitoring + metrics
+- **Metrics Consumer (8006)**: System metrics aggregation + metrics
+- **Kafka Consumer (8002)**: Storage service internal metrics endpoint
 - **ALPR Pilot (8001)**: Edge processing metrics
 
 ### Monitoring Stack (Ports 3000, 8082, 9090, 3100)
@@ -79,9 +89,16 @@ MinIO Console:      http://localhost:9001
 Kafka UI:           http://localhost:8080
   (No authentication)
 
+OpenSearch:         http://localhost:9200
+  Cluster Health:   http://localhost:9200/_cluster/health
+  Indices:          http://localhost:9200/_cat/indices?v
+  (No authentication - security disabled)
+
 Query API:          http://localhost:8000
   Health Check:     http://localhost:8000/health
   API Docs:         http://localhost:8000/docs
+  SQL Queries:      http://localhost:8000/events/*
+  Search Queries:   http://localhost:8000/search/*
 ```
 
 #### Monitoring & Observability
@@ -110,6 +127,15 @@ curl http://localhost:8000/metrics
 # Alert Engine
 curl http://localhost:8003/metrics
 
+# Elasticsearch Consumer (Search Indexing)
+curl http://localhost:8004/metrics
+
+# DLQ Consumer (Dead Letter Queue Monitoring)
+curl http://localhost:8005/metrics
+
+# Metrics Consumer (System Metrics Aggregation)
+curl http://localhost:8006/metrics
+
 # Kafka Consumer (internal only - not exposed to host)
 # Access via: docker exec alpr-kafka-consumer curl localhost:8002/metrics
 
@@ -126,6 +152,10 @@ curl http://localhost:9090/metrics
 # TimescaleDB (PostgreSQL)
 psql -h localhost -p 5432 -U alpr -d alpr_db
 # Password: alpr_secure_pass
+
+# OpenSearch (HTTP API)
+curl http://localhost:9200/_cluster/health?pretty
+curl http://localhost:9200/alpr-events-*/_search?pretty
 
 # MinIO (S3 API)
 aws s3 ls --endpoint-url http://localhost:9000
@@ -149,10 +179,13 @@ If running on a remote server, open these ports:
 - `9090` - Prometheus
 - `8082` - cAdvisor
 - `8003` - Alert Engine metrics
+- `8004` - Elasticsearch Consumer metrics
+- `9200` - OpenSearch (if direct search access needed)
 
 **Database Access (Use with caution)**:
 - `5432` - TimescaleDB (only if remote access needed)
 - `9092` - Kafka (only if remote producers needed)
+- `9200` - OpenSearch (already listed above - use with authentication in production)
 
 ### Internal Docker Network
 
@@ -181,6 +214,7 @@ All services communicate on the `alpr-network` bridge network:
 - **Exposes**: 8000 (HTTP + metrics)
 - **Connects to**:
   - TimescaleDB: timescaledb:5432
+  - OpenSearch: opensearch:9200
   - MinIO: minio:9000
 
 ### alert-engine (Alert Processing)
@@ -190,6 +224,13 @@ All services communicate on the `alpr-network` bridge network:
   - Schema Registry: http://schema-registry:8081
   - SMTP/Slack/Webhook/Twilio (for notifications)
 
+### elasticsearch-consumer (Search Indexing)
+- **Exposes**: 8004 (metrics)
+- **Connects to**:
+  - Kafka: kafka:29092
+  - Schema Registry: http://schema-registry:8081
+  - OpenSearch: opensearch:9200
+
 ### Prometheus
 - **Exposes**: 9090 (HTTP + metrics)
 - **Scrapes from**:
@@ -197,6 +238,7 @@ All services communicate on the `alpr-network` bridge network:
   - kafka-consumer: kafka-consumer:8002
   - query-api: query-api:8000
   - alert-engine: alert-engine:8003
+  - elasticsearch-consumer: elasticsearch-consumer:8004
   - cAdvisor: cadvisor:8080
 
 ### Grafana
@@ -217,6 +259,9 @@ KAFKA_JMX_PORT: 9101
 # Database Configuration
 DB_PORT: 5432
 
+# OpenSearch Configuration
+OPENSEARCH_HOSTS: http://opensearch:9200  # or http://localhost:9200 for host access
+
 # MinIO Configuration
 MINIO_ENDPOINT: minio:9000  # or localhost:9000 for host access
 
@@ -232,7 +277,7 @@ SCHEMA_REGISTRY_URL: http://schema-registry:8081
 sudo netstat -tulpn | grep :8080
 
 # Check all ALPR-related ports
-sudo netstat -tulpn | grep -E ':(8000|8001|8002|8080|8081|8082|3000|5432|9000|9001|9090|9092)'
+sudo netstat -tulpn | grep -E ':(8000|8001|8002|8003|8004|8080|8081|8082|3000|5432|9000|9001|9090|9092|9200|9600)'
 ```
 
 ### Verify Docker Port Mappings
@@ -323,10 +368,13 @@ Data:
   Kafka UI:        http://localhost:8080
   MinIO Console:   http://localhost:9001
   Schema Registry: http://localhost:8081
+  OpenSearch:      http://localhost:9200
 
 API:
   Query API:       http://localhost:8000
   API Docs:        http://localhost:8000/docs
+  SQL Endpoints:   http://localhost:8000/events/*
+  Search:          http://localhost:8000/search/*
 
 Monitoring:
   Grafana:         http://localhost:3000
@@ -337,6 +385,7 @@ Metrics:
   Pilot:           http://localhost:8001/metrics
   Query API:       http://localhost:8000/metrics
   Alert Engine:    http://localhost:8003/metrics
+  Search Indexer:  http://localhost:8004/metrics
 "'
 ```
 

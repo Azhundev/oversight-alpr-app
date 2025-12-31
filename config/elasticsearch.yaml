@@ -1,0 +1,30 @@
+opensearch:
+  hosts:
+    - "http://localhost:9200"
+  use_ssl: false
+  verify_certs: false
+
+  index:
+    prefix: "alpr-events"
+    rollover_age: "30d"
+    retention_days: 90
+    shards: 1
+    replicas: 0
+    refresh_interval: "5s"
+    codec: "best_compression"
+
+  bulk:
+    size: 50
+    flush_interval: 5
+    max_retries: 3
+
+kafka:
+  bootstrap_servers: "localhost:9092"
+  topic: "alpr.plates.detected"
+  group_id: "alpr-elasticsearch-consumer"
+  schema_registry:
+    url: "http://localhost:8081"
+
+dlq:
+  enabled: true
+  topic: "alpr.search.dlq"

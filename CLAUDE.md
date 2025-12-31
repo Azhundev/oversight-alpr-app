@@ -22,12 +22,15 @@
 ### Important Ports
 - 8000: Query API
 - 8001: Pilot metrics (edge)
+- 8002: Kafka Consumer metrics
 - 8003: Alert Engine metrics
+- 8004: Elasticsearch Consumer metrics
 - 8080: Kafka UI
 - 8081: Schema Registry
 - 3000: Grafana
 - 9090: Prometheus
 - 9000/9001: MinIO (API/Console)
+- 9200/9600: OpenSearch
 - 5432: TimescaleDB
 
 ### Key Commands
@@ -52,10 +55,14 @@ http://localhost:9001           # MinIO Console
 ### Service Dependencies
 - Kafka Consumer depends on: Kafka, Schema Registry, TimescaleDB
 - Alert Engine depends on: Kafka, Schema Registry
-- Query API depends on: TimescaleDB, MinIO
+- Elasticsearch Consumer depends on: Kafka, Schema Registry, OpenSearch
+- Query API depends on: TimescaleDB, MinIO, OpenSearch
 - Pilot (edge) publishes to: Kafka (localhost:9092)
 
 ### Recent Major Changes
+- ✅ Integrated OpenSearch for full-text search and analytics (2025-12-29)
+- ✅ Added Elasticsearch Consumer for real-time indexing (2025-12-29)
+- ✅ Extended Query API with 4 new search endpoints (2025-12-29)
 - ✅ Added Alert Engine with multi-channel notifications (2025-12-28)
 - ✅ Completed monitoring stack (Prometheus, Grafana, Loki) (2025-12-28)
 - ✅ Added MinIO object storage integration (2025-12-27)
@@ -67,10 +74,13 @@ http://localhost:9001           # MinIO Console
 2. **Add new camera**: Edit `config/cameras.yaml`, restart pilot.py
 3. **View metrics**: Check Grafana dashboards at http://localhost:3000
 4. **Query events**: Use REST API at http://localhost:8000/docs
-5. **Debug Kafka**: Use Kafka UI at http://localhost:8080
+5. **Search plates**: Use search endpoints at http://localhost:8000/docs#/default/search_fulltext_search_fulltext_get
+6. **Debug Kafka**: Use Kafka UI at http://localhost:8080
+7. **Check OpenSearch**: http://localhost:9200/_cluster/health
 
 ### Current System Status
-- Phase 3 COMPLETE: Production-ready distributed ALPR system
-- 13 core services + 6 infrastructure + 5 monitoring services
-- 90% of core features implemented
-- Next: Phase 4 Enterprise Features (BI, Elasticsearch, multi-site)
+- Phase 4 Priority 5 COMPLETE: OpenSearch integration with full-text search
+- 15 core services + 7 infrastructure + 5 monitoring services
+- Full-text search, faceted queries, analytics aggregations operational
+- Search endpoints: /search/fulltext, /search/facets, /search/analytics, /search/query
+- Next: Phase 4 remaining priorities (Multi-topic Kafka, Advanced BI)

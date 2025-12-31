@@ -1,0 +1,112 @@
+{
+  "index_patterns": ["alpr-events-*"],
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "refresh_interval": "5s",
+      "codec": "best_compression"
+    },
+    "mappings": {
+      "properties": {
+        "event_id": {
+          "type": "keyword"
+        },
+        "captured_at": {
+          "type": "date"
+        },
+        "camera_id": {
+          "type": "keyword"
+        },
+        "track_id": {
+          "type": "keyword"
+        },
+        "plate": {
+          "properties": {
+            "text": {
+              "type": "text",
+              "fields": {
+                "keyword": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "normalized_text": {
+              "type": "keyword"
+            },
+            "confidence": {
+              "type": "float"
+            },
+            "region": {
+              "type": "keyword"
+            }
+          }
+        },
+        "vehicle": {
+          "properties": {
+            "type": {
+              "type": "keyword"
+            },
+            "make": {
+              "type": "keyword"
+            },
+            "model": {
+              "type": "keyword"
+            },
+            "color": {
+              "type": "keyword"
+            }
+          }
+        },
+        "images": {
+          "properties": {
+            "plate_url": {
+              "type": "keyword",
+              "index": false
+            },
+            "vehicle_url": {
+              "type": "keyword",
+              "index": false
+            },
+            "frame_url": {
+              "type": "keyword",
+              "index": false
+            }
+          }
+        },
+        "latency_ms": {
+          "type": "integer"
+        },
+        "node": {
+          "properties": {
+            "site": {
+              "type": "keyword"
+            },
+            "host": {
+              "type": "keyword"
+            }
+          }
+        },
+        "extras": {
+          "properties": {
+            "roi": {
+              "type": "keyword"
+            },
+            "direction": {
+              "type": "keyword"
+            },
+            "quality_score": {
+              "type": "float"
+            },
+            "frame_number": {
+              "type": "long"
+            }
+          }
+        },
+        "indexed_at": {
+          "type": "date"
+        }
+      }
+    }
+  }
+}

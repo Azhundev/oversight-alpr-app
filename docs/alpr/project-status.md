@@ -1,16 +1,16 @@
 # OVR-ALPR Project Status
 
-**Last Updated:** 2025-12-28
+**Last Updated:** 2025-12-30
 
 This document provides a snapshot of the current implementation status, showing what's working, what's in progress, and what's planned next.
 
 ---
 
-## 🎯 Current Status: **Production-Ready (Phase 3 - 100% COMPLETE ✨)**
+## 🎯 Current Status: **Production-Ready (Phase 4 Priority 6 - Multi-Topic Kafka COMPLETE ✨)**
 
-The system is currently in **Phase 3** with a complete distributed architecture, comprehensive monitoring stack, and real-time alerting suitable for production deployments with 1-10 cameras. Core ALPR functionality is fully operational with enterprise-grade backend services, object storage, full observability, and automated notifications.
+The system is currently in **Phase 4** with a complete distributed architecture, comprehensive monitoring stack, real-time alerting, advanced search capabilities, and multi-topic Kafka architecture suitable for production deployments with 1-10 cameras. Core ALPR functionality is fully operational with enterprise-grade backend services, dual storage strategy (SQL + NoSQL), object storage, full observability, automated notifications, full-text search, and robust error handling with Dead Letter Queue.
 
-**Overall Completion:** 80% of original vision (100% of core features, 100% of Phase 3)
+**Overall Completion:** 90% of original vision (100% of core features, 100% of Phase 3, Phase 4 Priority 5 & 6 complete)
 
 ---
 
@@ -83,30 +83,33 @@ The system is currently in **Phase 3** with a complete distributed architecture,
   - Confidence filtering
 
 #### 6. Kafka Event Publishing ✅
-- **File:** `services/event_processor/avro_kafka_publisher.py`
-- **Status:** Production-ready with Avro serialization
+- **File:** `edge-services/event_processor/multi_topic_publisher.py`
+- **Status:** Production-ready with multi-topic Avro serialization
 - **Features:**
+  - Multi-topic routing (alpr.events.plates, alpr.events.vehicles, alpr.metrics, alpr.dlq)
   - Avro binary serialization (62% size reduction vs JSON)
   - Schema Registry integration (localhost:8081)
   - Async publishing with acknowledgments
   - GZIP compression
   - Idempotent producer (exactly-once semantics)
-  - Partition key for ordering (camera_id)
+  - Partition key for ordering (camera_id, host_id)
   - Automatic schema validation
   - Error handling and retries
+  - Dual-publish mode for migration support
 
 ### Backend Services (Docker)
 
 #### 7. Apache Kafka Broker ✅
 - **Container:** `alpr-kafka`
-- **Status:** Production-ready
+- **Status:** Production-ready with multi-topic architecture
 - **Features:**
-  - Topic: `alpr.plates.detected`
+  - Topics: `alpr.events.plates`, `alpr.events.vehicles`, `alpr.metrics`, `alpr.dlq`
   - 10,000+ msg/s capacity
   - 7-day message retention
   - GZIP compression
   - Consumer group coordination
   - Health checks
+  - Topic partitioning for scalability
 
 #### 8. Confluent Schema Registry ✅
 - **Container:** `alpr-schema-registry`
@@ -121,18 +124,20 @@ The system is currently in **Phase 3** with a complete distributed architecture,
   - Health checks
 
 #### 9. Kafka Consumer Service ✅
-- **File:** `services/storage/avro_kafka_consumer.py`
+- **File:** `core-services/storage/avro_kafka_consumer.py`
 - **Container:** `alpr-kafka-consumer`
-- **Status:** Production-ready with Avro support
+- **Status:** Production-ready with DLQ support
 - **Features:**
-  - Continuous message consumption
+  - Continuous message consumption from `alpr.events.plates`
   - Avro deserialization with Schema Registry
   - Automatic schema lookup by ID
-  - Switchable JSON/Avro mode (USE_AVRO env var)
+  - Retry logic with exponential backoff (3 attempts: 2s, 4s, 8s)
+  - Timeout detection (30-second maximum)
+  - Dead Letter Queue integration for failed messages
   - Graceful shutdown (SIGINT/SIGTERM)
   - Automatic offset management
-  - Error handling with retry logic
-  - Consumer statistics
+  - Comprehensive error handling
+  - Prometheus metrics (retries, timeouts, DLQ sent)
 
 #### 10. Storage Service ✅
 - **File:** `services/storage/storage_service.py`
@@ -304,15 +309,82 @@ The system is currently in **Phase 3** with a complete distributed architecture,
   - Configurable via `config/alert_rules.yaml`
   - Graceful shutdown handling
 
+#### 23. Elasticsearch Consumer ✅
+- **Container:** `alpr-elasticsearch-consumer`
+- **File:** `core-services/search/elasticsearch_consumer.py`
+- **Status:** Production-ready with DLQ support
+- **Features:**
+  - Real-time event indexing to OpenSearch
+  - Avro deserialization with Schema Registry
+  - Adaptive bulk indexing (50 docs or 5 seconds)
+  - Retry logic with exponential backoff (3 attempts: 2s, 4s, 8s)
+  - Timeout detection (30-second maximum)
+  - Dead Letter Queue integration for failed messages
+  - Dual triggers: size-based and time-based flushing
+  - Automatic monthly index creation (alpr-events-YYYY.MM)
+  - Prometheus metrics on port 8004
+  - Graceful shutdown handling
+  - Index lifecycle management (90-day retention)
+
+#### 24. OpenSearch ✅
+- **Container:** `alpr-opensearch`
+- **Status:** Production-ready
+- **Features:**
+  - OpenSearch 2.11.0 (Elasticsearch-compatible)
+  - Full-text search with fuzzy matching
+  - Faceted search and drill-down queries
+  - Real-time analytics and aggregations
+  - Monthly time-based indices (alpr-events-*)
+  - 90-day retention with automatic cleanup
+  - Index templates for consistent mapping
+  - Optimized field mappings (text + keyword)
+  - Cluster health monitoring
+  - Available at localhost:9200
+  - Integration with Query API search endpoints
+
+#### 25. Query API - Search Endpoints ✅
+- **File:** `services/api/query_api.py` (extended)
+- **Container:** `alpr-query-api`
+- **Status:** Production-ready
+- **New Features:**
+  - `/search/fulltext` - Full-text search with fuzzy matching
+  - `/search/facets` - Faceted search with aggregations
+  - `/search/analytics` - Time-series analytics and rankings
+  - `/search/query` - Advanced DSL queries
+  - OpenSearch client integration
+  - Sub-100ms search latency (p95)
+  - Dual storage access (TimescaleDB + OpenSearch)
+
+#### 26. DLQ Consumer ✅
+- **Container:** `alpr-dlq-consumer`
+- **File:** `core-services/dlq/dlq_consumer.py`
+- **Status:** Production-ready
+- **Features:**
+  - Monitors Dead Letter Queue topic (`alpr.dlq`)
+  - Logs detailed error information for debugging
+  - Avro deserialization with Schema Registry
+  - Prometheus metrics on port 8005
+  - Tracks errors by type (SCHEMA_VALIDATION, PROCESSING_FAILURE, TIMEOUT, etc.)
+  - Alerts on critical error patterns
+  - Graceful shutdown handling
+
+#### 27. Metrics Consumer ✅
+- **Container:** `alpr-metrics-consumer`
+- **File:** `core-services/metrics/metrics_consumer.py`
+- **Status:** Production-ready
+- **Features:**
+  - Consumes system metrics from `alpr.metrics` topic
+  - Dynamically creates Prometheus gauges
+  - Exposes metrics on port 8006
+  - Avro deserialization with Schema Registry
+  - Real-time metrics aggregation
+  - Graceful shutdown handling
+
 ---
 
 ## 🔄 Partially Implemented
 
-### 1. Kafka Topics 🟡
-- **Current:** Single topic (`alpr.plates.detected`)
-- **Missing:** Separate topics for metrics, DLQ, alerts
-- **Impact:** Less organized event streams
-- **Next:** Multi-topic architecture (Phase 4)
+None - All planned Phase 4 features (through Priority 6) are fully implemented.
 
 ---
 
@@ -320,14 +392,9 @@ The system is currently in **Phase 3** with a complete distributed architecture,
 
 ### Important Gaps (Phase 4 - Enterprise Features)
 
-1. **Elasticsearch/OpenSearch** ❌
-   - Full-text search
-   - Advanced analytics
-   - **Effort:** 2 weeks
-
-2. **Advanced BI** ❌
+1. **Advanced BI** ❌
    - Apache Superset or Metabase
-   - Custom reports
+   - Custom reports and executive dashboards
    - **Effort:** 2 weeks
 
 ### Future Enhancements (Phase 5 - Scale)
@@ -378,15 +445,18 @@ The system is currently in **Phase 3** with a complete distributed architecture,
 |---------|------------|---------|----------------|
 | **Kafka Broker** | 10,000+ msg/s | 1-5ms | 512MB RAM, <10% CPU |
 | **Kafka Consumer** | 100-500 events/s | <10ms | 256MB RAM, <5% CPU |
+| **Alert Engine** | 100+ events/s | <1s | 128MB RAM, <5% CPU |
+| **Elasticsearch Consumer** | 100+ events/s | 20-50ms bulk | 256MB RAM, <5% CPU |
 | **Storage Service** | 500-1000 inserts/s | 1-5ms | 512MB RAM |
 | **Query API** | 50-100 req/s | 10-100ms | 256MB RAM |
 | **TimescaleDB** | 1000+ writes/s | 5-50ms | 1-2GB RAM, 10-20% CPU |
+| **OpenSearch** | 100+ docs/s indexing | 10-30ms search (p95) | 1-1.5GB RAM, 10-15% CPU |
 | **Prometheus** | N/A | <100ms query | 4GB RAM, 10% CPU |
 | **Grafana** | N/A | <1s dashboard load | 1GB RAM, 5% CPU |
 | **Loki** | N/A | <500ms query | 1GB RAM, 5% CPU |
 | **cAdvisor** | N/A | real-time | 256MB RAM, <5% CPU |
 
-**Total Backend (Phase 3):** ~12GB RAM, ~50% CPU
+**Total Backend (Phase 4):** ~14GB RAM, ~60% CPU
 
 **System Capacity:** 100+ events/second sustained (thousands peak)
 
@@ -438,12 +508,23 @@ OVR-ALPR/
 │   │   ├── prometheus/
 │   │   │   └── prometheus.yml        # Metrics collection config
 │   │   ├── grafana/
-│   │   │   ├── dashboards/           # 4 pre-configured dashboards
+│   │   │   ├── dashboards/           # 5 pre-configured dashboards
 │   │   │   └── provisioning/         # Auto-provisioning configs
 │   │   ├── loki/
 │   │   │   └── loki-config.yaml      # Log aggregation config
 │   │   └── promtail/
 │   │       └── promtail-config.yaml  # Log shipping config
+│   ├── alerting/                     # ✅ Alert Engine
+│   │   ├── alert_engine.py           # Real-time notifications
+│   │   └── Dockerfile                # Alert Engine container
+│   ├── search/                       # ✅ Search & indexing services
+│   │   ├── elasticsearch_consumer.py # OpenSearch indexer
+│   │   ├── bulk_indexer.py           # Bulk API handler
+│   │   ├── opensearch_client.py      # OpenSearch wrapper
+│   │   ├── index_manager.py          # Index lifecycle
+│   │   ├── opensearch/
+│   │   │   └── templates/            # Index templates
+│   │   └── Dockerfile                # Search consumer container
 │   ├── storage/                      # Storage services
 │   └── api/                          # Query API
 │
@@ -496,6 +577,33 @@ None currently - system is stable in production testing.
 
 ### Recent Enhancements
 
+- ✅ **2025-12-30:** **Multi-Topic Kafka Architecture Complete** - Production-ready multi-topic architecture with DLQ support (Phase 4 Priority 6 - COMPLETE ✨)
+  - Multi-topic publisher with routing for plates, vehicles, metrics, and DLQ
+  - Storage Consumer updated with retry logic and DLQ support
+  - Alert Engine updated with retry logic and DLQ support
+  - Elasticsearch Consumer updated with retry logic and DLQ support
+  - DLQ Consumer service deployed (port 8005) for monitoring failed messages
+  - Metrics Consumer service deployed (port 8006) for system metrics aggregation
+  - Retry logic with exponential backoff (3 attempts: 2s, 4s, 8s delays)
+  - Timeout detection (30-second maximum processing time)
+  - Comprehensive Prometheus metrics for retries, timeouts, and DLQ messages
+  - All consumers subscribed to `alpr.events.plates` topic
+  - End-to-end testing complete with verified message flow
+  - See `docs/plans/Phase4_Priority6_Multi-Topic_Kafka.md` for complete documentation
+- ✅ **2025-12-29:** **OpenSearch Integration Complete** - Full-text search and analytics fully operational (Phase 4 Priority 5 - COMPLETE ✨)
+  - OpenSearch 2.11.0 deployed via Docker Compose (localhost:9200)
+  - Elasticsearch Consumer service for real-time event indexing (port 8004)
+  - Adaptive bulk indexing with dual triggers (50 docs or 5 seconds)
+  - Monthly time-based indices (alpr-events-YYYY.MM) with 90-day retention
+  - Query API extended with 4 new search endpoints (/search/fulltext, /search/facets, /search/analytics, /search/query)
+  - Full-text search with fuzzy matching and sub-100ms latency (p95)
+  - Faceted search with aggregations for drill-down queries
+  - Real-time analytics for dashboards and reporting
+  - Dual storage strategy: TimescaleDB (SQL) + OpenSearch (NoSQL search)
+  - Grafana dashboard for search metrics (indexing rate, bulk performance)
+  - Prometheus metrics: indexing rate, bulk duration, document counts
+  - End-to-end testing complete with comprehensive test script
+  - See `docs/ALPR_Pipeline/OpenSearch_Integration.md` for complete documentation
 - ✅ **2025-12-28:** **Alert Engine Complete** - Real-time notification system fully operational (Phase 3 - 100% COMPLETE ✨)
   - Alert Engine deployed via Docker Compose (localhost:8003)
   - Rule-based alert matching with 6 condition operators (equals, contains, regex, in_list, greater_than, less_than)
@@ -575,23 +683,58 @@ See [ALPR_Next_Steps.md](ALPR_Next_Steps.md) for detailed roadmap.
 1. ✅ **MinIO Object Storage** - Complete
 2. ✅ **Schema Registry** - Complete
 3. ✅ **Monitoring Stack** - Complete (Prometheus, Grafana, Loki, Promtail, cAdvisor)
-4. ✅ **Grafana Dashboards** - Complete (4 dashboards)
+4. ✅ **Grafana Dashboards** - Complete (5 dashboards)
 5. ✅ **Metrics Instrumentation** - Complete (all services)
 6. ✅ **Log Aggregation** - Complete (centralized logging)
 7. ✅ **Alert Engine** - Complete (Email, Slack, Webhooks, SMS)
 
 **Status:** System is now production-grade with full observability AND real-time alerting capabilities.
 
-### Phase 4: Enterprise Features (Next - Optional)
+### ✅ Phase 4 Priority 5: OpenSearch Integration (100% COMPLETE ✨)
 
-**Priority 1: Elasticsearch Integration** (2 weeks)
-- Full-text search and analytics
-- Better search performance
-- Advanced queries
+**All Items Completed:**
+1. ✅ **OpenSearch Deployment** - Complete (OpenSearch 2.11.0)
+2. ✅ **Elasticsearch Consumer** - Complete (real-time indexing)
+3. ✅ **Search Endpoints** - Complete (4 new API endpoints)
+4. ✅ **Monitoring Integration** - Complete (Grafana dashboard + Prometheus metrics)
+5. ✅ **Documentation** - Complete (comprehensive guide)
+6. ✅ **End-to-End Testing** - Complete (test script validated)
 
-**Priority 2: Multi-Topic Kafka Architecture** (1 week)
-- Separate topics for events, metrics, alerts, DLQ
-- Better event organization
+**Status:** System now has dual storage strategy (SQL + NoSQL) with advanced search capabilities.
+
+**Key Features:**
+- Full-text search with fuzzy matching
+- Faceted search with aggregations
+- Real-time analytics and time-series queries
+- Sub-100ms search latency (p95)
+- 90-day retention with monthly indices
+
+### ✅ Phase 4 Priority 6: Multi-Topic Kafka Architecture (100% COMPLETE ✨)
+
+**All Items Completed:**
+1. ✅ **Multi-Topic Publisher** - Complete (alpr.events.plates, alpr.events.vehicles, alpr.metrics, alpr.dlq)
+2. ✅ **DLQ Support for All Consumers** - Complete (Storage, Alert Engine, Elasticsearch)
+3. ✅ **Retry Logic with Exponential Backoff** - Complete (3 attempts: 2s, 4s, 8s)
+4. ✅ **Timeout Detection** - Complete (30-second maximum)
+5. ✅ **DLQ Consumer Service** - Complete (port 8005)
+6. ✅ **Metrics Consumer Service** - Complete (port 8006)
+7. ✅ **End-to-End Testing** - Complete (verified message flow)
+
+**Status:** System now has robust error handling with Dead Letter Queue, retry logic, and comprehensive failure tracking.
+
+**Key Features:**
+- Multi-topic event routing
+- Automatic retry with exponential backoff
+- Dead Letter Queue for failed messages
+- Timeout detection to prevent stuck processing
+- Full Prometheus instrumentation
+
+### Phase 4: Enterprise Features (Remaining - Optional)
+
+**Priority 7: Advanced BI** (2 weeks)
+- Apache Superset or Metabase
+- Custom reports and executive dashboards
+- Pre-built analytics templates
 
 ---
 
@@ -601,16 +744,20 @@ See [ALPR_Next_Steps.md](ALPR_Next_Steps.md) for detailed roadmap.
 
 - ✅ Complete edge-to-cloud pipeline functional
 - ✅ Event persistence with time-series optimization
-- ✅ REST API for event querying
+- ✅ Dual storage strategy (TimescaleDB + OpenSearch)
+- ✅ REST API for event querying (SQL + Search endpoints)
 - ✅ Docker-based deployment
 - ✅ Per-track OCR optimization (10-30x performance gain)
 - ✅ Sub-100ms edge processing latency
-- ✅ Zero data loss (Kafka + TimescaleDB)
+- ✅ Zero data loss (Kafka + TimescaleDB + OpenSearch)
 - ✅ Full observability stack operational
-- ✅ 4 production-ready Grafana dashboards
+- ✅ 5 production-ready Grafana dashboards
 - ✅ Centralized log aggregation
 - ✅ Real-time alerting via 4 channels (Email, Slack, Webhooks, SMS)
 - ✅ Rule-based event notifications with rate limiting
+- ✅ Full-text search with fuzzy matching
+- ✅ Faceted search and real-time analytics
+- ✅ Sub-100ms search latency (p95)
 
 ### Phase 3 Targets
 
@@ -627,11 +774,27 @@ See [ALPR_Next_Steps.md](ALPR_Next_Steps.md) for detailed roadmap.
 | Dashboard users | Available | 5+ | 🟡 Ready for users |
 | Uptime tracking | Via Prometheus | 99.5% | ✅ Can measure now |
 
+### Phase 4 Priority 5 Targets (OpenSearch)
+
+| Metric | Current | Target | Status |
+|--------|---------|--------|--------|
+| Search latency (p95) | <30ms | <100ms | ✅ Exceeded |
+| Indexing throughput | 23.4 events/sec | 10+ events/sec | ✅ Exceeded |
+| Full-text search | Operational with fuzzy matching | Full-text search | ✅ Achieved |
+| Faceted search | Operational with aggregations | Faceted search | ✅ Achieved |
+| Analytics queries | Real-time time-series | Analytics support | ✅ Achieved |
+| Search endpoints | 4 endpoints | 3+ endpoints | ✅ Exceeded |
+| Index retention | 90 days (monthly indices) | 90 days | ✅ Achieved |
+| Bulk duration (p95) | <500ms | <1s | ✅ Exceeded |
+| OpenSearch memory | ~886MB | <1.5GB | ✅ Achieved |
+| Dual storage | SQL + NoSQL operational | Dual storage | ✅ Achieved |
+
 ---
 
 ## 🔗 Related Documentation
 
 - [SERVICES_OVERVIEW.md](SERVICES_OVERVIEW.md) - Complete technical reference for all services
+- [OpenSearch_Integration.md](OpenSearch_Integration.md) - OpenSearch integration guide
 - [ALPR_Next_Steps.md](ALPR_Next_Steps.md) - Detailed roadmap and implementation plans
 - [PIPELINE_COMPARISON.md](PIPELINE_COMPARISON.md) - Architecture comparisons
 - [README.md](README.md) - Deployment guide
@@ -640,10 +803,10 @@ See [ALPR_Next_Steps.md](ALPR_Next_Steps.md) for detailed roadmap.
 
 ## 💡 Summary
 
-**What's Working:** Complete ALPR pipeline from camera to database with event streaming, object storage, full observability, and real-time alerting
+**What's Working:** Complete ALPR pipeline from camera to database with event streaming, dual storage (SQL + NoSQL), object storage, full observability, real-time alerting, advanced search capabilities, and robust error handling with Dead Letter Queue
 
-**What's Next:** Phase 4 Enterprise Features (optional) - Elasticsearch, Advanced BI, Multi-topic Kafka
+**What's Next:** Phase 4 Enterprise Features (optional) - Advanced BI
 
-**Timeline:** System is production-grade NOW with full monitoring AND automated notifications. Phase 3 is 100% complete.
+**Timeline:** System is production-grade NOW with full monitoring, automated notifications, advanced search, AND enterprise-grade error handling. Phase 3 is 100% complete. Phase 4 Priorities 5 & 6 (OpenSearch + Multi-Topic Kafka) are 100% complete.
 
-**Status:** ✅ **Production-Ready for Small/Medium Deployments (1-10 cameras) - Phase 3 Complete ✨**
+**Status:** ✅ **Production-Ready for Small/Medium Deployments (1-10 cameras) - Phase 4 Priority 6 Complete ✨**

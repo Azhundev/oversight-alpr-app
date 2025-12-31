@@ -6,11 +6,13 @@ Optimized for NVIDIA Jetson Orin NX with TensorRT
 import cv2
 import numpy as np
 import torch
+import tensorrt as trt
 from ultralytics import YOLO
 from loguru import logger
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
 import time
+import json
 
 from shared.schemas.event import BoundingBox, VehicleDetection
 
@@ -86,11 +88,45 @@ class YOLOv11Detector:
         if self.use_tensorrt and not model_path.endswith('.engine'):
             # Look for cached .engine file (same name as .pt model)
             engine_path = str(Path(model_path).with_suffix('.engine'))
+            version_file = str(Path(model_path).with_suffix('.engine.version'))
 
+            # Check if engine exists and version matches
             if Path(engine_path).exists():
-                logger.info(f"Loading existing TensorRT engine: {engine_path}")
-                model = YOLO(engine_path)
-                return model
+                # Verify TensorRT version compatibility
+                current_trt_version = trt.__version__
+                engine_is_valid = False
+
+                if Path(version_file).exists():
+                    try:
+                        with open(version_file, 'r') as f:
+                            version_info = json.load(f)
+                            stored_version = version_info.get('tensorrt_version')
+                            if stored_version == current_trt_version:
+                                engine_is_valid = True
+                                logger.debug(f"TensorRT version matches: {current_trt_version}")
+                            else:
+                                logger.warning(
+                                    f"TensorRT version mismatch: engine={stored_version}, current={current_trt_version}"
+                                )
+                    except Exception as e:
+                        logger.warning(f"Failed to read version file: {e}")
+                else:
+                    logger.warning(f"No version file found for engine: {version_file}")
+
+                if engine_is_valid:
+                    logger.info(f"Loading existing TensorRT engine: {engine_path}")
+                    try:
+                        model = YOLO(engine_path)
+                        return model
+                    except Exception as e:
+                        logger.warning(f"Failed to load TensorRT engine: {e}")
+                        engine_is_valid = False
+
+                if not engine_is_valid:
+                    logger.warning(f"Deleting incompatible engine and rebuilding: {engine_path}")
+                    Path(engine_path).unlink(missing_ok=True)
+                    Path(version_file).unlink(missing_ok=True)
+                    # Will rebuild below
             else:
                 logger.info(f"No existing TensorRT engine found, will create: {engine_path}")
 
@@ -124,9 +160,25 @@ class YOLOv11Detector:
                         half=self.fp16,  # Enable FP16 precision
                         device=self.device,
                         batch=self.batch_size,
-                        workspace=2,  # 2GB workspace for FP16 optimization
+                        workspace=1,  # 1GB workspace (reduced to prevent OOM on Jetson)
                     )
                 logger.success(f"TensorRT engine created: {engine_path}")
+
+                # Store TensorRT version info for future compatibility checks
+                version_file = str(Path(engine_path).with_suffix('.version'))
+                try:
+                    version_info = {
+                        'tensorrt_version': trt.__version__,
+                        'cuda_version': torch.version.cuda,
+                        'torch_version': torch.__version__,
+                        'created_at': time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    with open(version_file, 'w') as f:
+                        json.dump(version_info, f, indent=2)
+                    logger.debug(f"Created version file: {version_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to create version file: {e}")
+
                 # Reload the optimized engine
                 model = YOLO(engine_path)
             except Exception as e:

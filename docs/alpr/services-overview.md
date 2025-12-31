@@ -41,7 +41,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 ## System Summary
 
-**Total Services**: 13 core services + 6 infrastructure services + 5 monitoring services
+**Total Services**: 17 core services + 7 infrastructure services + 5 monitoring services
 
 **Edge Processing** (pilot.py):
 1. Camera Ingestion Service
@@ -50,23 +50,28 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 4. Tracker Service (ByteTrack)
 5. OCR Service (PaddleOCR)
 6. Event Processor Service
-7. Avro Kafka Publisher Service (with Schema Registry)
+7. Multi-Topic Avro Kafka Publisher Service (with Schema Registry & topic routing)
 
 **Backend Services** (Docker):
 8. Storage Service (Database abstraction)
-9. Avro Kafka Consumer Service (Event persistence)
-10. Query API Service (REST API)
-11. Image Storage Service (MinIO uploads)
-12. Alert Engine Service (Real-time notifications)
-13. Consumer Entrypoint Service (JSON/Avro router)
+9. Avro Kafka Consumer Service (Event persistence to TimescaleDB with DLQ support)
+10. Elasticsearch Consumer Service (Event indexing to OpenSearch with DLQ support)
+11. Query API Service (REST API with SQL & Search endpoints)
+12. Image Storage Service (MinIO uploads)
+13. Alert Engine Service (Real-time notifications with DLQ support)
+14. Consumer Entrypoint Service (JSON/Avro router)
+15. Search Service (Full-text search and analytics)
+16. DLQ Consumer Service (Dead Letter Queue monitoring - Port 8005)
+17. Metrics Consumer Service (System metrics aggregation - Port 8006)
 
 **Infrastructure** (Docker):
 - Apache Kafka (message broker)
 - Confluent Schema Registry (Avro schema management)
 - ZooKeeper (Kafka coordination)
 - Kafka UI (web monitoring)
-- TimescaleDB (time-series database)
+- TimescaleDB (time-series SQL database)
 - MinIO (S3-compatible object storage)
+- OpenSearch (full-text search and analytics engine)
 
 **Monitoring Stack** (Docker):
 - Prometheus (metrics collection and storage)
@@ -79,16 +84,25 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 - Real-time plate detection and recognition
 - Multi-object tracking with ID persistence
 - Event validation and deduplication
-- Asynchronous event streaming via Kafka
-- Time-series optimized storage
+- Asynchronous event streaming via Kafka (Avro) with multi-topic architecture
+- Dual storage: TimescaleDB (SQL) + OpenSearch (full-text search)
 - RESTful query API with pagination
+- Full-text search with fuzzy matching
+- Faceted search and drill-down queries
+- Real-time analytics and aggregations
+- Multi-channel alert notifications
+- Dead Letter Queue for robust error handling
+- Retry logic with exponential backoff (3 attempts)
+- Timeout detection (30-second maximum)
 - Comprehensive monitoring and logging
 
 **Technology Stack**:
 - **Edge**: Python 3.8+, PyTorch, TensorRT, PaddleOCR, OpenCV
 - **Messaging**: Apache Kafka 7.5.0, Confluent Schema Registry 7.5.0, Avro
-- **Storage**: TimescaleDB (PostgreSQL 16 + TimescaleDB), MinIO (S3-compatible)
+- **Storage**: TimescaleDB (PostgreSQL 16 + TimescaleDB), OpenSearch 2.11.0, MinIO (S3-compatible)
 - **API**: FastAPI, Uvicorn, Pydantic
+- **Search**: OpenSearch 2.11.0 (Elasticsearch-compatible)
+- **Monitoring**: Prometheus, Grafana, Loki, cAdvisor
 - **Deployment**: Docker Compose
 - **Hardware**: NVIDIA Jetson (Orin NX/AGX) with CUDA support
 
@@ -1745,6 +1759,389 @@ SELECT * FROM plate_events_stats;
 2. Check database logs: `docker logs alpr-timescaledb`
 3. Test connection: `docker exec alpr-timescaledb pg_isready -U alpr`
 4. Ensure `init_db.sql` ran successfully: Check for tables in database
+
+### OpenSearch Not Indexing Events
+
+**Symptom**: Events in TimescaleDB but not in OpenSearch
+
+**Solutions**:
+1. Check Elasticsearch Consumer status: `docker logs alpr-elasticsearch-consumer`
+2. Verify OpenSearch cluster health: `curl http://localhost:9200/_cluster/health`
+3. Check consumer metrics: `curl http://localhost:8004/metrics`
+4. Verify Kafka connectivity from consumer
+5. Check for indexing errors in logs
+
+### Search Queries Returning No Results
+
+**Symptom**: `/search/*` endpoints return empty results
+
+**Solutions**:
+1. Verify documents exist: `curl http://localhost:9200/alpr-events-*/_count`
+2. Check index mapping: `curl http://localhost:9200/alpr-events-*/_mapping`
+3. Test direct OpenSearch query: `curl 'http://localhost:9200/alpr-events-*/_search?q=*'`
+4. Verify Query API OpenSearch connection in logs
+
+---
+
+## 10. Elasticsearch Consumer Service
+
+**File**: `core-services/search/elasticsearch_consumer.py`
+**Container**: `alpr-elasticsearch-consumer`
+**Port**: `8004` (Prometheus metrics)
+**Dependencies**: Kafka, Schema Registry, OpenSearch
+
+### Purpose
+
+Consumes plate detection events from Kafka and indexes them to OpenSearch for full-text search, faceted queries, and real-time analytics. Provides a complementary search layer alongside TimescaleDB SQL queries.
+
+### Features
+
+- **Avro Deserialization**: Uses Schema Registry for schema evolution
+- **Bulk Indexing**: Adaptive batching (50 documents OR 5 seconds)
+- **Monthly Indices**: Automatic routing to time-based indices (`alpr-events-YYYY.MM`)
+- **Error Handling**: Retry logic with exponential backoff
+- **Monitoring**: Full Prometheus instrumentation
+
+### Configuration
+
+**File**: `config/elasticsearch.yaml`
+
+```yaml
+opensearch:
+  hosts:
+    - "http://localhost:9200"
+  index:
+    prefix: "alpr-events"
+    retention_days: 90
+  bulk:
+    size: 50
+    flush_interval: 5
+
+kafka:
+  topic: "alpr.plates.detected"
+  group_id: "alpr-elasticsearch-consumer"
+  schema_registry:
+    url: "http://localhost:8081"
+```
+
+### Docker Configuration
+
+```yaml
+elasticsearch-consumer:
+  build:
+    context: .
+    dockerfile: core-services/search/Dockerfile
+  container_name: alpr-elasticsearch-consumer
+  depends_on:
+    kafka:
+      condition: service_healthy
+    schema-registry:
+      condition: service_healthy
+    opensearch:
+      condition: service_healthy
+  ports:
+    - "8004:8004"  # Prometheus metrics
+  environment:
+    KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    KAFKA_TOPIC: alpr.plates.detected
+    KAFKA_GROUP_ID: alpr-elasticsearch-consumer
+    SCHEMA_REGISTRY_URL: http://schema-registry:8081
+    OPENSEARCH_HOSTS: http://opensearch:9200
+    OPENSEARCH_INDEX_PREFIX: alpr-events
+    OPENSEARCH_BULK_SIZE: "50"
+    OPENSEARCH_FLUSH_INTERVAL: "5"
+    AUTO_OFFSET_RESET: latest
+  volumes:
+    - ./logs:/app/logs
+  networks:
+    - alpr-network
+  restart: unless-stopped
+```
+
+### Bulk Indexing Strategy
+
+The service uses **adaptive bulk indexing** with dual flush triggers:
+
+1. **Size Trigger**: Flush when 50 documents accumulated
+2. **Time Trigger**: Flush every 5 seconds
+
+This balances throughput (bulk efficiency) with freshness (near real-time search).
+
+**Performance**:
+- Indexing throughput: ~20-30 events/sec
+- Bulk duration (p95): < 50ms
+- Memory usage: ~34 MB
+
+### Prometheus Metrics
+
+**Endpoint**: `http://localhost:8004/metrics`
+
+**Key Metrics**:
+```
+# Consumption metrics
+elasticsearch_consumer_messages_consumed_total
+elasticsearch_consumer_messages_indexed_total
+elasticsearch_consumer_messages_failed_total
+
+# Bulk performance
+elasticsearch_consumer_bulk_requests_total
+elasticsearch_consumer_bulk_size_documents (histogram)
+elasticsearch_consumer_bulk_duration_seconds (histogram)
+
+# Health
+elasticsearch_consumer_opensearch_available (gauge)
+```
+
+### Health Checks
+
+```bash
+# Check consumer logs
+docker logs alpr-elasticsearch-consumer --tail 50
+
+# Check Prometheus metrics
+curl http://localhost:8004/metrics | grep elasticsearch_consumer
+
+# Verify indexing
+curl http://localhost:9200/alpr-events-*/_count
+
+# Check consumer stats
+docker logs alpr-elasticsearch-consumer | grep "Stats:"
+```
+
+### Troubleshooting
+
+**No events being indexed**:
+```bash
+# 1. Check Kafka connectivity
+docker logs alpr-elasticsearch-consumer | grep "Connected to Kafka"
+
+# 2. Check OpenSearch health
+curl http://localhost:9200/_cluster/health
+
+# 3. Check for errors
+docker logs alpr-elasticsearch-consumer | grep ERROR
+```
+
+**Slow indexing**:
+```bash
+# Increase bulk size (in docker-compose.yml)
+OPENSEARCH_BULK_SIZE: "100"
+
+# Reduce flush interval
+OPENSEARCH_FLUSH_INTERVAL: "3"
+```
+
+---
+
+## 11. OpenSearch Infrastructure
+
+**Image**: `opensearchproject/opensearch:2.11.0`
+**Container**: `alpr-opensearch`
+**Ports**:
+- `9200`: HTTP REST API
+- `9600`: Performance Analyzer
+
+### Purpose
+
+Provides full-text search, faceted queries, and real-time analytics capabilities for ALPR events. Complements TimescaleDB by offering unstructured search with fuzzy matching and relevance scoring.
+
+### Features
+
+- **Full-Text Search**: Multi-field search with fuzzy matching
+- **Faceted Search**: Aggregations for drill-down UIs
+- **Analytics**: Time-series aggregations, top-N queries
+- **Document-Oriented**: Flexible schema, easy to add fields
+- **Query DSL**: Powerful query language for complex searches
+
+### Configuration
+
+```yaml
+opensearch:
+  image: opensearchproject/opensearch:2.11.0
+  container_name: alpr-opensearch
+  environment:
+    discovery.type: single-node
+    DISABLE_SECURITY_PLUGIN: "true"
+    OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx1g"  # Optimized for Jetson
+    bootstrap.memory_lock: "false"
+  ports:
+    - "9200:9200"
+    - "9600:9600"
+  volumes:
+    - opensearch-data:/usr/share/opensearch/data
+  networks:
+    - alpr-network
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+    interval: 30s
+    timeout: 10s
+    retries: 5
+    start_period: 60s
+```
+
+### Index Design
+
+**Pattern**: `alpr-events-YYYY.MM` (e.g., `alpr-events-2025.12`)
+
+**Benefits**:
+- Easy retention management (delete old indices)
+- Better query performance (smaller indices)
+- Aligns with 90-day retention (3 indices max)
+
+### Health Checks
+
+```bash
+# Cluster health
+curl http://localhost:9200/_cluster/health
+
+# List indices
+curl http://localhost:9200/_cat/indices?v
+
+# Document count
+curl http://localhost:9200/alpr-events-*/_count
+
+# Index stats
+curl http://localhost:9200/alpr-events-*/_stats
+```
+
+### Query Examples
+
+**Full-text search**:
+```bash
+curl "http://localhost:9200/alpr-events-*/_search?q=plate.text:ABC123"
+```
+
+**Faceted aggregation**:
+```bash
+curl -X POST "http://localhost:9200/alpr-events-*/_search" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "size": 0,
+    "aggs": {
+      "by_camera": {
+        "terms": {"field": "camera_id", "size": 10}
+      }
+    }
+  }'
+```
+
+**Time-series analytics**:
+```bash
+curl -X POST "http://localhost:9200/alpr-events-*/_search" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "size": 0,
+    "aggs": {
+      "events_over_time": {
+        "date_histogram": {
+          "field": "captured_at",
+          "fixed_interval": "1h"
+        }
+      }
+    }
+  }'
+```
+
+### Performance
+
+**Resource Usage**:
+- Memory: ~886 MB (< 1.5 GB target)
+- CPU: ~0.6%
+- Disk: Depends on retention (3 months × event rate)
+
+**Query Performance**:
+- Full-text search: 20-30ms
+- Faceted search: 10-15ms
+- Analytics: 5-10ms
+
+### Maintenance
+
+**Index Lifecycle**:
+```bash
+# Delete old indices (manual)
+curl -X DELETE "http://localhost:9200/alpr-events-2024.09"
+
+# Reindex (if schema changes)
+curl -X POST "http://localhost:9200/_reindex" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "source": {"index": "alpr-events-2025.12"},
+    "dest": {"index": "alpr-events-2025.12-v2"}
+  }'
+```
+
+---
+
+## 12. Query API - Search Endpoints
+
+**Added Endpoints** (December 2025):
+
+### `/search/fulltext` - Full-Text Search
+
+```
+GET /search/fulltext?q={query}&limit={n}&camera_id={id}
+```
+
+**Features**:
+- Multi-field search (plate.text, normalized_text, vehicle.make)
+- Fuzzy matching (`fuzziness: AUTO`)
+- Time range and camera filtering
+- Pagination support
+
+**Example**:
+```bash
+curl "http://localhost:8000/search/fulltext?q=ABC123&limit=10"
+```
+
+### `/search/facets` - Faceted Search
+
+```
+GET /search/facets?camera_id={id}&vehicle_type={type}
+```
+
+**Returns**: Events + aggregation facets (cameras, vehicle types, colors, sites)
+
+**Example**:
+```bash
+curl "http://localhost:8000/search/facets?camera_id=CAM1&limit=20"
+```
+
+### `/search/analytics` - Analytics
+
+```
+GET /search/analytics?metric={metric}&interval={interval}
+```
+
+**Supported Metrics**:
+- `plates_per_hour`: Event count over time
+- `avg_confidence`: Average confidence over time
+- `top_plates`: Most frequently seen plates
+
+**Example**:
+```bash
+curl "http://localhost:8000/search/analytics?metric=avg_confidence&interval=1h"
+```
+
+### `/search/query` - Advanced DSL
+
+```
+POST /search/query
+Content-Type: application/json
+```
+
+**Accepts**: Raw OpenSearch Query DSL
+**Returns**: Full OpenSearch response with hits and aggregations
+
+**Example**:
+```bash
+curl -X POST "http://localhost:8000/search/query" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": {"match": {"plate.text": "ABC"}},
+    "size": 50
+  }'
+```
 
 ---
 

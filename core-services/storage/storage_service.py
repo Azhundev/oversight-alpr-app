@@ -120,12 +120,12 @@ class StorageService:
 
         conn = None
         try:
-            # Extract fields from event dictionary
-            plate = event_dict.get('plate', {})
-            vehicle = event_dict.get('vehicle', {})
-            images = event_dict.get('images', {})
-            node = event_dict.get('node', {})
-            extras = event_dict.get('extras', {})
+            # Extract fields from event dictionary (handle None values)
+            plate = event_dict.get('plate') or {}
+            vehicle = event_dict.get('vehicle') or {}
+            images = event_dict.get('images') or {}
+            node = event_dict.get('node') or {}
+            extras = event_dict.get('extras') or {}
 
             # Prepare SQL insert
             sql = """
@@ -168,7 +168,7 @@ class StorageService:
                 plate.get('text'),
                 plate.get('normalized_text'),
                 plate.get('confidence'),
-                plate.get('region'),
+                plate.get('region') or 'UNKNOWN',  # Default to 'UNKNOWN' if None
                 vehicle.get('type'),
                 vehicle.get('make'),
                 vehicle.get('model'),

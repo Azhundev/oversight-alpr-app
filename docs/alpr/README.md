@@ -18,18 +18,24 @@ This guide covers deploying the OVR-ALPR (Overhead View Recognition - Automatic 
 OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Jetson platforms with GPU hardware acceleration. The system uses a hybrid architecture:
 
 - **Edge Processing** (Jetson Device): Real-time camera ingestion with GPU video decode, detection, OCR, and tracking
-- **Containerized Services** (Docker): Data storage, event streaming, and query API
+- **Containerized Services** (Docker): Data storage, event streaming, dual-storage (SQL + NoSQL search), and REST API
+- **Dual Storage Strategy**: TimescaleDB for SQL queries + OpenSearch for full-text search and analytics
 
 ### Key Components
 
 | Component | Type | Purpose |
 |-----------|------|---------|
-| **pilot.py** | Python Application | Main ALPR pipeline (runs on host) |
-| **Kafka** | Docker Container | Event streaming platform |
+| **pilot.py** | Python Application | Main ALPR pipeline (runs on host) with multi-topic publisher |
+| **Kafka** | Docker Container | Event streaming platform (multi-topic architecture) |
 | **Schema Registry** | Docker Container | Avro schema management (Port 8081) |
 | **TimescaleDB** | Docker Container | Time-series database for events |
-| **Kafka Consumer** | Docker Container | Stores events from Kafka to DB |
-| **Query API** | Docker Container | REST API for querying events |
+| **Kafka Consumer** | Docker Container | Stores events from Kafka to DB (with DLQ support) |
+| **Alert Engine** | Docker Container | Real-time alerting with multi-channel notifications (with DLQ support) |
+| **Elasticsearch Consumer** | Docker Container | Indexes events to OpenSearch for search (with DLQ support) |
+| **DLQ Consumer** | Docker Container | Monitors Dead Letter Queue for failed messages (Port 8005) |
+| **Metrics Consumer** | Docker Container | Aggregates system metrics from Kafka (Port 8006) |
+| **OpenSearch** | Docker Container | Full-text search and analytics engine |
+| **Query API** | Docker Container | REST API for SQL & search queries |
 | **Kafka UI** | Docker Container | Web interface for Kafka |
 | **MinIO** | Docker Container | S3-compatible object storage for images |
 | **Prometheus** | Docker Container | Metrics collection and storage |
@@ -62,27 +68,47 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
 │  │(Port    │  │  Registry   │               │
 │  │ 9092)   │  │ (Port 8081) │               │
 │  └────┬────┘  └─────────────┘               │
-│       │         ┌──────────────┐             │
-│       │         │    MinIO     │             │
-│       │         │ (Port 9000)  │             │
-│       │         │  S3 Storage  │             │
-│       │         └──────────────┘             │
-│       ├──→ ┌─────────────────┐               │
-│       │    │ Kafka Consumer  │               │
-│       │    │ (Avro→Storage)  │               │
-│       │    └────────┬────────┘               │
-│       │             ▼                        │
-│       │    ┌──────────────────┐              │
-│       │    │   TimescaleDB    │              │
-│       │    │   (Port 5432)    │              │
-│       │    └────────┬─────────┘              │
-│       │             │                        │
-│       │             ▼                        │
-│       └──→ ┌──────────────────┐              │
-│            │    Query API     │              │
-│            │   (Port 8000)    │              │
-│            └──────────────────┘              │
-└────────────────────────────────────────────┘
+│       │                                     │
+│       ├──→ ┌─────────────────┐              │
+│       │    │ Kafka Consumer  │              │
+│       │    │ (Avro→Storage)  │              │
+│       │    └────────┬────────┘              │
+│       │             ▼                       │
+│       │    ┌──────────────────┐             │
+│       │    │   TimescaleDB    │             │
+│       │    │   (Port 5432)    │             │
+│       │    └────────┬─────────┘             │
+│       │             │                       │
+│       ├──→ ┌─────────────────────┐          │
+│       │    │  Alert Engine       │          │
+│       │    │  (Notifications)    │          │
+│       │    └─────────────────────┘          │
+│       │                                     │
+│       ├──→ ┌──────────────────────┐         │
+│       │    │ Elasticsearch        │         │
+│       │    │ Consumer             │         │
+│       │    └────────┬─────────────┘         │
+│       │             ▼                       │
+│       │    ┌──────────────────┐             │
+│       │    │   OpenSearch     │             │
+│       │    │   (Port 9200)    │             │
+│       │    └────────┬─────────┘             │
+│       │             │                       │
+│       │    ┌────────┴─────────┐             │
+│       │    │                  │             │
+│       │    ▼                  ▼             │
+│       │  ┌──────────────────────────┐       │
+│       └─→│     Query API            │       │
+│          │   SQL + Search Endpoints │       │
+│          │     (Port 8000)          │       │
+│          └──────────────────────────┘       │
+│                                             │
+│          ┌──────────────┐                   │
+│          │    MinIO     │                   │
+│          │ (Port 9000)  │                   │
+│          │  S3 Storage  │                   │
+│          └──────────────┘                   │
+└─────────────────────────────────────────────┘
 ```
 
 ## Prerequisites
@@ -113,10 +139,19 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
 - Open ports:
   - 5432 (TimescaleDB)
   - 8000 (Query API)
+  - 8001 (Pilot metrics)
+  - 8002 (Kafka Consumer metrics)
+  - 8003 (Alert Engine metrics)
+  - 8004 (Elasticsearch Consumer metrics)
+  - 8005 (DLQ Consumer metrics)
+  - 8006 (Metrics Consumer metrics)
   - 8080 (Kafka UI)
   - 9000 (MinIO API)
   - 9001 (MinIO Console)
   - 9092 (Kafka)
+  - 9200/9600 (OpenSearch)
+  - 3000 (Grafana)
+  - 9090 (Prometheus)
   - RTSP camera streams (if using IP cameras)
 
 ## Quick Start
@@ -188,10 +223,32 @@ python3 pilot.py --no-display --frame-skip 2
 
 - **Query API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
+- **Grafana Dashboards**: http://localhost:3000 (user: admin, password: alpr_admin_2024)
+- **Prometheus**: http://localhost:9090
 - **Kafka UI**: http://localhost:8080
 - **MinIO Console**: http://localhost:9001 (user: alpr_minio, password: alpr_minio_secure_pass_2024)
 - **MinIO API**: http://localhost:9000
+- **OpenSearch**: http://localhost:9200
 - **TimescaleDB**: localhost:5432 (user: alpr, db: alpr_db)
+
+### 6. Test the System
+
+```bash
+# Query recent events (SQL)
+curl "http://localhost:8000/events/recent?limit=10"
+
+# Search for a plate (Full-text search)
+curl "http://localhost:8000/search/fulltext?q=ABC123"
+
+# Get faceted search results
+curl "http://localhost:8000/search/facets?camera_id=cam1&limit=20"
+
+# Get analytics
+curl "http://localhost:8000/search/analytics?metric=top_plates&limit=10"
+
+# Check OpenSearch cluster health
+curl "http://localhost:9200/_cluster/health"
+```
 
 ## Deployment Options
 
@@ -280,13 +337,22 @@ DB_NAME=alpr_db
 DB_USER=alpr
 DB_PASSWORD=your_secure_password
 
-# Kafka Configuration
+# Kafka Configuration (Multi-Topic Architecture)
 KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-KAFKA_TOPIC=alpr.plates.detected
+KAFKA_TOPIC_PLATES=alpr.events.plates
+KAFKA_TOPIC_VEHICLES=alpr.events.vehicles
+KAFKA_TOPIC_METRICS=alpr.metrics
+KAFKA_TOPIC_DLQ=alpr.dlq
 
 # API Configuration
 API_PORT=8000
 API_CORS_ORIGINS=*
+
+# Consumer Configuration (with DLQ Support)
+MAX_RETRIES=3
+RETRY_DELAY_BASE=2.0
+PROCESSING_TIMEOUT=30.0
+ENABLE_DLQ=true
 ```
 
 ### Docker Compose Override
@@ -332,6 +398,8 @@ The system includes a complete monitoring stack for production deployments:
 - **ALPR Overview** - Real-time FPS, detections, latency metrics
 - **System Performance** - CPU, RAM, network usage per container
 - **Kafka & Database** - Message consumption, DB writes, API performance
+- **Search & Indexing (OpenSearch)** - Indexing rate, bulk performance, search metrics
+- **Alert Engine** - Alert processing, notification delivery
 - **Logs Explorer** - Centralized log search and filtering
 
 **Access**:
@@ -343,6 +411,8 @@ The system includes a complete monitoring stack for production deployments:
 - Plates detected (last minute and total)
 - Kafka publish/consume rates
 - Database write performance
+- OpenSearch indexing rate and search latency
+- Alert processing and delivery stats
 - Container resource usage
 
 ### Service Health
@@ -356,6 +426,8 @@ docker compose ps
 # Specific service logs
 docker compose logs -f query-api
 docker compose logs -f kafka-consumer
+docker compose logs -f alert-engine
+docker compose logs -f elasticsearch-consumer
 
 # Resource usage
 docker stats
@@ -373,8 +445,19 @@ curl http://localhost:8000/health
 # Database statistics
 curl http://localhost:8000/stats
 
+# OpenSearch cluster health
+curl http://localhost:9200/_cluster/health
+
+# OpenSearch indices
+curl http://localhost:9200/_cat/indices?v
+
 # Prometheus metrics
 curl http://localhost:8001/metrics  # pilot.py
+curl http://localhost:8002/metrics  # kafka-consumer
+curl http://localhost:8003/metrics  # alert-engine
+curl http://localhost:8004/metrics  # elasticsearch-consumer
+curl http://localhost:8005/metrics  # dlq-consumer
+curl http://localhost:8006/metrics  # metrics-consumer
 curl http://localhost:8000/metrics  # query-api
 curl http://localhost:9090          # Prometheus
 ```
@@ -416,6 +499,36 @@ FROM plate_events
 WHERE detected_at > NOW() - INTERVAL '1 hour'
 GROUP BY plate_normalized_text
 ORDER BY count DESC;
+```
+
+### OpenSearch Monitoring
+
+Check OpenSearch cluster and indices:
+
+```bash
+# Cluster health
+curl http://localhost:9200/_cluster/health?pretty
+
+# List all indices
+curl http://localhost:9200/_cat/indices?v
+
+# Index stats
+curl http://localhost:9200/alpr-events-*/_stats?pretty
+
+# Search for recent documents
+curl -X GET "http://localhost:9200/alpr-events-*/_search?pretty" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "size": 5,
+    "sort": [{"captured_at": "desc"}],
+    "query": {"match_all": {}}
+  }'
+
+# Count documents by index
+curl http://localhost:9200/alpr-events-*/_count?pretty
+
+# Get index mapping
+curl http://localhost:9200/alpr-events-*/_mapping?pretty
 ```
 
 ### System Monitoring
@@ -576,11 +689,48 @@ docker exec alpr-kafka kafka-consumer-groups \
   --describe
 ```
 
+### OpenSearch Not Indexing
+
+```bash
+# Check Elasticsearch Consumer logs
+docker compose logs -f elasticsearch-consumer
+
+# Verify OpenSearch is running
+docker compose ps opensearch
+
+# Check cluster health
+curl http://localhost:9200/_cluster/health
+
+# Check indices
+curl http://localhost:9200/_cat/indices?v
+
+# Verify consumer metrics
+curl http://localhost:8004/metrics | grep elasticsearch_consumer
+```
+
+### Search Queries Not Working
+
+```bash
+# Verify OpenSearch connection
+curl http://localhost:9200/_cluster/health
+
+# Check if documents exist
+curl "http://localhost:9200/alpr-events-*/_count"
+
+# Test direct OpenSearch query
+curl -X GET "http://localhost:9200/alpr-events-*/_search?q=*&size=1"
+
+# Check Query API logs
+docker compose logs -f query-api
+```
+
 For more troubleshooting tips, see [troubleshooting.md](troubleshooting.md).
 
 ## Related Documentation
 
 - [Architecture Overview](architecture.md)
+- [Services Overview](SERVICES_OVERVIEW.md)
+- [OpenSearch Integration Guide](OpenSearch_Integration.md)
 - [Docker Setup Guide](../docker-setup.md)
 - [Storage Layer Documentation](../storage-layer.md)
 - [Kafka Integration Guide](../INTEGRATION_COMPLETE%20Kafka%20+%20Event%20Processing.md)

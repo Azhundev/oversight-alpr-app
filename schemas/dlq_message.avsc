@@ -1,0 +1,85 @@
+{
+  "type": "record",
+  "name": "DLQMessage",
+  "namespace": "com.alpr.dlq",
+  "doc": "Dead Letter Queue envelope for failed message processing",
+  "fields": [
+    {
+      "name": "dlq_id",
+      "type": "string",
+      "doc": "Unique DLQ entry identifier (UUID)"
+    },
+    {
+      "name": "timestamp",
+      "type": "string",
+      "doc": "ISO 8601 timestamp when message failed and was sent to DLQ"
+    },
+    {
+      "name": "original_topic",
+      "type": "string",
+      "doc": "Original Kafka topic the message was consumed from"
+    },
+    {
+      "name": "original_partition",
+      "type": "int",
+      "doc": "Original partition number"
+    },
+    {
+      "name": "original_offset",
+      "type": "long",
+      "doc": "Original offset within partition"
+    },
+    {
+      "name": "original_key",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Original message key (partition key)"
+    },
+    {
+      "name": "original_message",
+      "type": "string",
+      "doc": "Original message serialized as JSON string (or Base64 if binary)"
+    },
+    {
+      "name": "consumer_group_id",
+      "type": "string",
+      "doc": "Consumer group ID that failed to process the message"
+    },
+    {
+      "name": "error_type",
+      "type": {
+        "type": "enum",
+        "name": "DLQErrorType",
+        "symbols": ["SCHEMA_VALIDATION", "PROCESSING_FAILURE", "TIMEOUT", "BUSINESS_LOGIC", "UNKNOWN"],
+        "doc": "Type of error that caused DLQ routing"
+      },
+      "doc": "Error classification"
+    },
+    {
+      "name": "error_message",
+      "type": "string",
+      "doc": "Human-readable error description"
+    },
+    {
+      "name": "error_stack_trace",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Full stack trace if available"
+    },
+    {
+      "name": "retry_count",
+      "type": "int",
+      "default": 0,
+      "doc": "Number of retry attempts made before sending to DLQ"
+    },
+    {
+      "name": "metadata",
+      "type": {
+        "type": "map",
+        "values": "string"
+      },
+      "default": {},
+      "doc": "Additional context metadata (host, service, version, etc.)"
+    }
+  ]
+}

@@ -1,0 +1,135 @@
+{
+  "type": "record",
+  "name": "VehicleEvent",
+  "namespace": "com.alpr.events",
+  "doc": "Vehicle tracking event without plate detection",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string",
+      "doc": "Unique event identifier (UUID)"
+    },
+    {
+      "name": "captured_at",
+      "type": "string",
+      "doc": "ISO 8601 timestamp when vehicle was captured"
+    },
+    {
+      "name": "camera_id",
+      "type": "string",
+      "doc": "Camera identifier"
+    },
+    {
+      "name": "track_id",
+      "type": "string",
+      "doc": "Vehicle track identifier"
+    },
+    {
+      "name": "vehicle",
+      "type": {
+        "type": "record",
+        "name": "VehicleInfo",
+        "fields": [
+          {
+            "name": "type",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Vehicle type: car, truck, bus, motorcycle"
+          },
+          {
+            "name": "color",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Vehicle color"
+          },
+          {
+            "name": "bbox",
+            "type": {
+              "type": "record",
+              "name": "BoundingBox",
+              "fields": [
+                {"name": "x1", "type": "float", "doc": "Top-left x coordinate"},
+                {"name": "y1", "type": "float", "doc": "Top-left y coordinate"},
+                {"name": "x2", "type": "float", "doc": "Bottom-right x coordinate"},
+                {"name": "y2", "type": "float", "doc": "Bottom-right y coordinate"}
+              ]
+            },
+            "doc": "Bounding box coordinates"
+          },
+          {
+            "name": "confidence",
+            "type": "float",
+            "doc": "Detection confidence score (0.0-1.0)"
+          }
+        ]
+      },
+      "doc": "Vehicle detection information"
+    },
+    {
+      "name": "tracking",
+      "type": {
+        "type": "record",
+        "name": "TrackingInfo",
+        "fields": [
+          {
+            "name": "direction",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Vehicle direction: N, S, E, W, NE, NW, SE, SW"
+          },
+          {
+            "name": "speed_kmh",
+            "type": ["null", "float"],
+            "default": null,
+            "doc": "Estimated speed in km/h"
+          },
+          {
+            "name": "dwell_time_seconds",
+            "type": ["null", "float"],
+            "default": null,
+            "doc": "Time vehicle spent in frame (seconds)"
+          },
+          {
+            "name": "first_seen_at",
+            "type": "string",
+            "doc": "ISO 8601 timestamp when track started"
+          },
+          {
+            "name": "last_seen_at",
+            "type": "string",
+            "doc": "ISO 8601 timestamp when track last updated"
+          }
+        ]
+      },
+      "doc": "Vehicle tracking information"
+    },
+    {
+      "name": "latency_ms",
+      "type": "int",
+      "default": 0,
+      "doc": "Processing latency in milliseconds"
+    },
+    {
+      "name": "node",
+      "type": {
+        "type": "record",
+        "name": "NodeInfo",
+        "fields": [
+          {
+            "name": "site",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Site identifier (e.g., DC1, HQ)"
+          },
+          {
+            "name": "host",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Host identifier (e.g., jetson-orin-nx)"
+          }
+        ]
+      },
+      "doc": "Edge node information"
+    }
+  ]
+}

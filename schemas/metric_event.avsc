@@ -1,0 +1,63 @@
+{
+  "type": "record",
+  "name": "MetricEvent",
+  "namespace": "com.alpr.metrics",
+  "doc": "System health and performance metrics event",
+  "fields": [
+    {
+      "name": "metric_id",
+      "type": "string",
+      "doc": "Unique metric event identifier (UUID)"
+    },
+    {
+      "name": "timestamp",
+      "type": "string",
+      "doc": "ISO 8601 timestamp when metric was collected"
+    },
+    {
+      "name": "host_id",
+      "type": "string",
+      "doc": "Host identifier (e.g., jetson-orin-nx, edge-node-01)"
+    },
+    {
+      "name": "site_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Site identifier (e.g., DC1, HQ, Site-A)"
+    },
+    {
+      "name": "metric_type",
+      "type": {
+        "type": "enum",
+        "name": "MetricType",
+        "symbols": ["FPS", "LATENCY", "GPU_UTIL", "MEMORY", "SERVICE_HEALTH", "KAFKA_LAG", "CUSTOM"],
+        "doc": "Enumeration of metric types"
+      },
+      "doc": "Type of metric being reported"
+    },
+    {
+      "name": "metric_name",
+      "type": "string",
+      "doc": "Metric name (e.g., pipeline_fps, gpu_utilization, memory_usage)"
+    },
+    {
+      "name": "value",
+      "type": "float",
+      "doc": "Metric value (numeric)"
+    },
+    {
+      "name": "unit",
+      "type": "string",
+      "doc": "Unit of measurement (fps, ms, percent, bytes, MB, etc.)"
+    },
+    {
+      "name": "tags",
+      "type": {
+        "type": "map",
+        "values": "string"
+      },
+      "default": {},
+      "doc": "Additional tags for grouping/filtering (camera_id, service_name, component, etc.)"
+    }
+  ]
+}

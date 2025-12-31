@@ -5,9 +5,9 @@ REST API for retrieving historical plate detection events from TimescaleDB
 """
 
 import os
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel
 from loguru import logger
@@ -15,6 +15,14 @@ import uvicorn
 
 from services.storage.storage_service import StorageService
 from services.storage.image_storage_service import ImageStorageService
+
+# OpenSearch for full-text search
+try:
+    from opensearchpy import OpenSearch
+    OPENSEARCH_AVAILABLE = True
+except ImportError:
+    OPENSEARCH_AVAILABLE = False
+    logger.warning("opensearch-py not installed, search endpoints will be unavailable")
 
 # Prometheus metrics
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -46,6 +54,7 @@ Instrumentator().instrument(app).expose(app)
 # Global storage service instances
 storage: Optional[StorageService] = None
 image_storage: Optional[ImageStorageService] = None
+opensearch_client: Optional[OpenSearch] = None
 
 
 # Response models
@@ -138,11 +147,41 @@ async def startup_event():
         logger.warning(f"⚠️  MinIO not available: {e}")
         image_storage = None
 
+    # Initialize OpenSearch client for full-text search
+    global opensearch_client
+    if OPENSEARCH_AVAILABLE:
+        try:
+            opensearch_hosts = os.getenv("OPENSEARCH_HOSTS", "http://opensearch:9200")
+            opensearch_host_list = [h.strip() for h in opensearch_hosts.split(',')]
+
+            opensearch_client = OpenSearch(
+                hosts=opensearch_host_list,
+                use_ssl=False,
+                verify_certs=False,
+                timeout=30
+            )
+
+            # Test connection
+            info = opensearch_client.info()
+            logger.success(f"✅ Query API connected to OpenSearch: {info.get('version', {}).get('number', 'unknown')}")
+        except Exception as e:
+            logger.warning(f"⚠️  OpenSearch not available: {e}")
+            opensearch_client = None
+    else:
+        logger.warning("⚠️  OpenSearch client not available (opensearch-py not installed)")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close database connection on shutdown"""
-    global storage, image_storage
+    global storage, image_storage, opensearch_client
+
+    if opensearch_client:
+        try:
+            opensearch_client.close()
+            logger.info("OpenSearch client closed")
+        except Exception as e:
+            logger.warning(f"Error closing OpenSearch client: {e}")
 
     if image_storage:
         image_storage.shutdown(wait=False, timeout=5)
@@ -210,7 +249,12 @@ async def root():
             "by_id": "/events/{event_id}",
             "by_plate": "/events/plate/{plate_text}",
             "by_camera": "/events/camera/{camera_id}",
-        }
+            "search_fulltext": "/search/fulltext",
+            "search_facets": "/search/facets",
+            "search_analytics": "/search/analytics",
+            "search_query": "/search/query",
+        },
+        "opensearch_available": opensearch_client is not None
     }
 
 
@@ -449,6 +493,322 @@ async def search_events(
         },
         "events": events
     }
+
+
+# ============================================================================
+# OPENSEARCH FULL-TEXT SEARCH ENDPOINTS
+# ============================================================================
+
+@app.get("/search/fulltext")
+async def search_fulltext(
+    q: str = Query(..., description="Search query (supports fuzzy matching)"),
+    start_time: Optional[str] = Query(None, description="Start time (ISO 8601 format)"),
+    end_time: Optional[str] = Query(None, description="End time (ISO 8601 format)"),
+    camera_id: Optional[str] = Query(None, description="Filter by camera ID"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum results"),
+    offset: int = Query(0, ge=0, description="Offset for pagination")
+):
+    """
+    Full-text search across plate events with fuzzy matching.
+
+    Searches across:
+    - plate.text (full-text with fuzziness)
+    - plate.normalized_text (exact match)
+    - vehicle.make
+
+    Examples:
+        /search/fulltext?q=ABC123
+        /search/fulltext?q=toyota&start_time=2025-01-01T00:00:00Z
+        /search/fulltext?q=ABC&camera_id=cam1
+    """
+    if not opensearch_client:
+        raise HTTPException(status_code=503, detail="Search service unavailable")
+
+    # Build query
+    query = {
+        "bool": {
+            "must": [
+                {
+                    "multi_match": {
+                        "query": q,
+                        "fields": ["plate.text", "plate.normalized_text^2", "vehicle.make"],
+                        "fuzziness": "AUTO",
+                        "type": "best_fields"
+                    }
+                }
+            ],
+            "filter": []
+        }
+    }
+
+    # Add time range filter
+    if start_time or end_time:
+        time_filter = {"range": {"captured_at": {}}}
+        if start_time:
+            time_filter["range"]["captured_at"]["gte"] = start_time
+        if end_time:
+            time_filter["range"]["captured_at"]["lte"] = end_time
+        query["bool"]["filter"].append(time_filter)
+
+    # Add camera filter
+    if camera_id:
+        query["bool"]["filter"].append({"term": {"camera_id": camera_id}})
+
+    # Execute search
+    try:
+        results = opensearch_client.search(
+            index="alpr-events-*",
+            body={
+                "query": query,
+                "from": offset,
+                "size": limit,
+                "sort": [{"captured_at": "desc"}]
+            }
+        )
+
+        return {
+            "query": q,
+            "total": results["hits"]["total"]["value"],
+            "took_ms": results["took"],
+            "results": [hit["_source"] for hit in results["hits"]["hits"]],
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+@app.get("/search/facets")
+async def search_facets(
+    camera_id: Optional[str] = Query(None, description="Filter by camera ID"),
+    vehicle_type: Optional[str] = Query(None, description="Filter by vehicle type"),
+    vehicle_color: Optional[str] = Query(None, description="Filter by vehicle color"),
+    site: Optional[str] = Query(None, description="Filter by site ID"),
+    start_time: Optional[str] = Query(None, description="Start time (ISO 8601)"),
+    end_time: Optional[str] = Query(None, description="End time (ISO 8601)"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum results")
+):
+    """
+    Faceted search with aggregations for building drill-down UIs.
+
+    Returns matching events plus aggregation counts for:
+    - Cameras
+    - Vehicle types
+    - Vehicle colors
+    - Sites
+
+    Examples:
+        /search/facets
+        /search/facets?camera_id=cam1
+        /search/facets?vehicle_type=car&vehicle_color=white
+    """
+    if not opensearch_client:
+        raise HTTPException(status_code=503, detail="Search service unavailable")
+
+    # Build filters
+    filters = []
+    if camera_id:
+        filters.append({"term": {"camera_id": camera_id}})
+    if vehicle_type:
+        filters.append({"term": {"vehicle.type": vehicle_type}})
+    if vehicle_color:
+        filters.append({"term": {"vehicle.color": vehicle_color}})
+    if site:
+        filters.append({"term": {"node.site": site}})
+
+    # Add time range filter
+    if start_time or end_time:
+        time_filter = {"range": {"captured_at": {}}}
+        if start_time:
+            time_filter["range"]["captured_at"]["gte"] = start_time
+        if end_time:
+            time_filter["range"]["captured_at"]["lte"] = end_time
+        filters.append(time_filter)
+
+    # Build query
+    query_body = {
+        "query": {"bool": {"filter": filters}} if filters else {"match_all": {}},
+        "size": limit,
+        "sort": [{"captured_at": "desc"}],
+        "aggs": {
+            "cameras": {"terms": {"field": "camera_id", "size": 50}},
+            "vehicle_types": {"terms": {"field": "vehicle.type", "size": 20}},
+            "vehicle_colors": {"terms": {"field": "vehicle.color", "size": 20}},
+            "sites": {"terms": {"field": "node.site", "size": 20}}
+        }
+    }
+
+    # Execute search
+    try:
+        results = opensearch_client.search(
+            index="alpr-events-*",
+            body=query_body
+        )
+
+        return {
+            "total": results["hits"]["total"]["value"],
+            "took_ms": results["took"],
+            "results": [hit["_source"] for hit in results["hits"]["hits"]],
+            "facets": {
+                "cameras": results["aggregations"]["cameras"]["buckets"],
+                "vehicle_types": results["aggregations"]["vehicle_types"]["buckets"],
+                "vehicle_colors": results["aggregations"]["vehicle_colors"]["buckets"],
+                "sites": results["aggregations"]["sites"]["buckets"]
+            },
+            "filters": {
+                "camera_id": camera_id,
+                "vehicle_type": vehicle_type,
+                "vehicle_color": vehicle_color,
+                "site": site
+            }
+        }
+    except Exception as e:
+        logger.error(f"Faceted search error: {e}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+@app.get("/search/analytics")
+async def search_analytics(
+    metric: str = Query(..., description="Metric type: plates_per_hour | avg_confidence | top_plates"),
+    interval: str = Query("1h", description="Time interval: 1m, 5m, 1h, 1d"),
+    start_time: Optional[str] = Query(None, description="Start time (ISO 8601)"),
+    end_time: Optional[str] = Query(None, description="End time (ISO 8601)"),
+    camera_id: Optional[str] = Query(None, description="Filter by camera ID")
+):
+    """
+    Analytics aggregations for dashboards and reporting.
+
+    Available metrics:
+    - plates_per_hour: Histogram of detection counts over time
+    - avg_confidence: Average OCR confidence over time
+    - top_plates: Most frequently seen plates
+
+    Examples:
+        /search/analytics?metric=plates_per_hour&interval=1h
+        /search/analytics?metric=avg_confidence&interval=1h&camera_id=cam1
+        /search/analytics?metric=top_plates
+    """
+    if not opensearch_client:
+        raise HTTPException(status_code=503, detail="Search service unavailable")
+
+    # Build base filter
+    filters = []
+    if camera_id:
+        filters.append({"term": {"camera_id": camera_id}})
+
+    if start_time or end_time:
+        time_filter = {"range": {"captured_at": {}}}
+        if start_time:
+            time_filter["range"]["captured_at"]["gte"] = start_time
+        if end_time:
+            time_filter["range"]["captured_at"]["lte"] = end_time
+        filters.append(time_filter)
+
+    base_query = {"bool": {"filter": filters}} if filters else {"match_all": {}}
+
+    # Build aggregation based on metric type
+    aggs = {}
+    if metric == "plates_per_hour":
+        aggs = {
+            "plates_over_time": {
+                "date_histogram": {
+                    "field": "captured_at",
+                    "fixed_interval": interval
+                }
+            }
+        }
+    elif metric == "avg_confidence":
+        aggs = {
+            "confidence_over_time": {
+                "date_histogram": {
+                    "field": "captured_at",
+                    "fixed_interval": interval
+                },
+                "aggs": {
+                    "avg_confidence": {"avg": {"field": "plate.confidence"}}
+                }
+            }
+        }
+    elif metric == "top_plates":
+        aggs = {
+            "top_plates": {
+                "terms": {
+                    "field": "plate.normalized_text",
+                    "size": 100
+                }
+            }
+        }
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown metric: {metric}")
+
+    # Execute search
+    try:
+        results = opensearch_client.search(
+            index="alpr-events-*",
+            body={
+                "query": base_query,
+                "size": 0,  # No documents, just aggregations
+                "aggs": aggs
+            }
+        )
+
+        return {
+            "metric": metric,
+            "took_ms": results["took"],
+            "total_events": results["hits"]["total"]["value"],
+            "aggregations": results["aggregations"],
+            "filters": {
+                "camera_id": camera_id,
+                "start_time": start_time,
+                "end_time": end_time
+            }
+        }
+    except Exception as e:
+        logger.error(f"Analytics error: {e}")
+        raise HTTPException(status_code=500, detail=f"Analytics failed: {str(e)}")
+
+
+@app.post("/search/query")
+async def search_query(query_dsl: Dict[str, Any] = Body(..., description="OpenSearch Query DSL")):
+    """
+    Advanced search using raw OpenSearch Query DSL.
+
+    Allows executing arbitrary OpenSearch queries for advanced use cases.
+
+    Example request body:
+    {
+        "query": {
+            "bool": {
+                "must": [
+                    {"match": {"plate.text": "ABC"}}
+                ],
+                "filter": [
+                    {"range": {"captured_at": {"gte": "2025-01-01"}}}
+                ]
+            }
+        },
+        "size": 100
+    }
+    """
+    if not opensearch_client:
+        raise HTTPException(status_code=503, detail="Search service unavailable")
+
+    try:
+        results = opensearch_client.search(
+            index="alpr-events-*",
+            body=query_dsl
+        )
+
+        return {
+            "took_ms": results["took"],
+            "total": results["hits"]["total"]["value"],
+            "results": [hit["_source"] for hit in results["hits"]["hits"]],
+            "aggregations": results.get("aggregations", None)
+        }
+    except Exception as e:
+        logger.error(f"DSL query error: {e}")
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
 
 def main():

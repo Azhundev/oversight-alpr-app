@@ -10,6 +10,7 @@ print("=== PILOT.PY STARTING ===", flush=True)
 import cv2
 import sys
 import time
+import os
 import numpy as np
 from pathlib import Path
 from loguru import logger
@@ -194,31 +195,59 @@ class ALPRPilot:
         )
 
         # Initialize Kafka Publisher with Avro serialization and Schema Registry
-        logger.info("Initializing Avro Kafka Publisher...")
-        try:
-            self.kafka_publisher = AvroKafkaPublisher(
-                bootstrap_servers="localhost:9092",  # Kafka broker address
-                schema_registry_url="http://localhost:8081",  # Schema Registry for Avro validation
-                topic="alpr.plates.detected",  # Topic for plate detection events
-                schema_file="schemas/plate_event.avsc",  # Avro schema definition (relative to project root)
-                client_id="alpr-jetson-producer",  # Unique client identifier for monitoring
-                compression_type="gzip",  # Compress messages to reduce network bandwidth (62% reduction)
-                acks="all",  # Wait for all replicas to acknowledge (strongest durability guarantee)
-            )
-            logger.success("✅ Avro Kafka publisher connected (Schema Registry: http://localhost:8081)")
-        except Exception as e:
-            # Graceful degradation: if Kafka/Schema Registry unavailable, use mock publisher
-            # Mock publisher logs events locally without actual Kafka connectivity
-            logger.warning(f"⚠️  Kafka/Schema Registry not available, using mock publisher: {e}")
-            self.kafka_publisher = MockKafkaPublisher(
-                bootstrap_servers="localhost:9092",  # Not used by mock, kept for consistency
-                topic="alpr.plates.detected",
-            )
+        # Support both legacy single-topic and new multi-topic publishers
+        use_multi_topic = os.getenv("KAFKA_USE_MULTI_TOPIC", "true").lower() == "true"
+        enable_dual_publish = os.getenv("KAFKA_ENABLE_DUAL_PUBLISH", "false").lower() == "true"
+
+        if use_multi_topic:
+            logger.info("Initializing Multi-Topic Avro Kafka Publisher...")
+            try:
+                from edge_services.event_processor.multi_topic_publisher import MultiTopicAvroPublisher
+                self.kafka_publisher = MultiTopicAvroPublisher(
+                    bootstrap_servers="localhost:9092",  # Kafka broker address
+                    schema_registry_url="http://localhost:8081",  # Schema Registry for Avro validation
+                    client_id="alpr-jetson-producer",  # Unique client identifier for monitoring
+                    compression_type="gzip",  # Compress messages to reduce network bandwidth (62% reduction)
+                    acks="all",  # Wait for all replicas to acknowledge (strongest durability guarantee)
+                    enable_dual_publish=enable_dual_publish,  # Publish to both old and new topics during migration
+                    legacy_topic="alpr.plates.detected",  # Legacy topic for dual-publish mode
+                )
+                logger.success(
+                    f"✅ Multi-topic Kafka publisher connected (Schema Registry: http://localhost:8081)\n"
+                    f"   Dual-publish: {'enabled' if enable_dual_publish else 'disabled'}"
+                )
+            except Exception as e:
+                # Graceful degradation: if Kafka/Schema Registry unavailable, use mock publisher
+                logger.warning(f"⚠️  Kafka/Schema Registry not available, using mock publisher: {e}")
+                self.kafka_publisher = MockKafkaPublisher(
+                    bootstrap_servers="localhost:9092",
+                    topic="alpr.events.plates",
+                )
+        else:
+            logger.info("Initializing Legacy Single-Topic Avro Kafka Publisher...")
+            try:
+                self.kafka_publisher = AvroKafkaPublisher(
+                    bootstrap_servers="localhost:9092",  # Kafka broker address
+                    schema_registry_url="http://localhost:8081",  # Schema Registry for Avro validation
+                    topic="alpr.plates.detected",  # Topic for plate detection events (legacy)
+                    schema_file="schemas/plate_event.avsc",  # Avro schema definition (relative to project root)
+                    client_id="alpr-jetson-producer",  # Unique client identifier for monitoring
+                    compression_type="gzip",  # Compress messages to reduce network bandwidth (62% reduction)
+                    acks="all",  # Wait for all replicas to acknowledge (strongest durability guarantee)
+                )
+                logger.success("✅ Legacy Avro Kafka publisher connected (Schema Registry: http://localhost:8081)")
+            except Exception as e:
+                # Graceful degradation: if Kafka/Schema Registry unavailable, use mock publisher
+                # Mock publisher logs events locally without actual Kafka connectivity
+                logger.warning(f"⚠️  Kafka/Schema Registry not available, using mock publisher: {e}")
+                self.kafka_publisher = MockKafkaPublisher(
+                    bootstrap_servers="localhost:9092",  # Not used by mock, kept for consistency
+                    topic="alpr.plates.detected",
+                )
 
         # Initialize Image Storage Service (MinIO) for S3-compatible plate image storage
         logger.info("Initializing Image Storage Service...")
         try:
-            import os
             self.image_storage = ImageStorageService(
                 endpoint=os.getenv("MINIO_ENDPOINT", "localhost:9000"),  # MinIO server address
                 access_key=os.getenv("MINIO_ACCESS_KEY", "alpr_minio"),  # S3 access key
@@ -436,8 +465,15 @@ class ALPRPilot:
             )
 
             if event:
-                # Publish to Kafka
-                success = self.kafka_publisher.publish_event(event.to_dict())
+                # Publish to Kafka (support both legacy and multi-topic publishers)
+                from edge_services.event_processor.multi_topic_publisher import MultiTopicAvroPublisher
+                if isinstance(self.kafka_publisher, MultiTopicAvroPublisher):
+                    # Use multi-topic publisher (routes to alpr.events.plates)
+                    success = self.kafka_publisher.publish_plate_event(event.to_dict())
+                else:
+                    # Use legacy single-topic publisher (routes to alpr.plates.detected)
+                    success = self.kafka_publisher.publish_event(event.to_dict())
+
                 if success:
                     # Metrics: Record successful event publication
                     self.metrics_events_published.labels(camera_id=camera_id).inc()
