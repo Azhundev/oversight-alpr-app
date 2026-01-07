@@ -1,8 +1,8 @@
 # OVR-ALPR: Automatic License Plate Recognition System
 
-**Production-ready ALPR system with distributed architecture** for real-time vehicle detection, license plate recognition, and event streaming.
+**Enterprise-grade ALPR system with distributed architecture** for real-time vehicle detection, license plate recognition, event streaming, and business intelligence.
 
-[![Status](https://img.shields.io/badge/status-production--ready-green)]() [![Phase](https://img.shields.io/badge/phase-2-blue)]() [![Cameras](https://img.shields.io/badge/cameras-1--10-orange)]()
+[![Status](https://img.shields.io/badge/status-enterprise--ready-green)]() [![Phase](https://img.shields.io/badge/phase-4-blue)]() [![Cameras](https://img.shields.io/badge/cameras-1--10-orange)]()
 
 ---
 
@@ -41,6 +41,8 @@ python3 pilot.py --help
 
 - **Query API:** http://localhost:8000/docs (interactive API documentation)
 - **Grafana Dashboards:** http://localhost:3000 (admin/alpr_admin_2024)
+- **Metabase BI:** http://localhost:3001 (business intelligence & analytics)
+- **OpenSearch Dashboards:** http://localhost:5601 (search visualization)
 - **Prometheus:** http://localhost:9090 (metrics and alerts)
 - **Kafka UI:** http://localhost:8080 (message broker monitoring)
 - **MinIO Console:** http://localhost:9001 (object storage)
@@ -61,33 +63,43 @@ python3 pilot.py --help
 ### Backend Services (Docker)
 7. **Streams** events via Apache Kafka with Schema Registry
 8. **Stores** events in TimescaleDB (time-series database)
-9. **Stores** images in MinIO (S3-compatible storage)
-10. **Provides** REST API for querying events
-11. **Alerts** via multi-channel notification engine
-12. **Monitors** via Prometheus, Grafana, and Loki
-13. **Manages** via Kafka UI web interface
+9. **Indexes** events in OpenSearch (full-text search & analytics)
+10. **Stores** images in MinIO (S3-compatible storage)
+11. **Provides** REST API for querying events (SQL + search endpoints)
+12. **Alerts** via multi-channel notification engine (Email, Slack, SMS, Webhooks)
+13. **Monitors** via Prometheus, Grafana, and Loki (metrics, dashboards, logs)
+14. **Analyzes** via Metabase (business intelligence & executive reports)
+15. **Manages** via Kafka UI and OpenSearch Dashboards
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│    EDGE (Jetson)                        │
-│  Camera → Detection → Tracking → OCR    │
-│         → Event Processing → Kafka      │
-└────────────────┬────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│    EDGE (Jetson)                                    │
+│  Camera → Detection → Tracking → OCR                │
+│         → Event Processing → Kafka                  │
+└────────────────┬────────────────────────────────────┘
                  │
                  ▼
-┌─────────────────────────────────────────┐
-│    BACKEND (Docker)                     │
-│  Kafka → Consumer → TimescaleDB         │
-│                  ↓                      │
-│              Query API                  │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│    BACKEND (Docker - 28 Services)                   │
+│                                                      │
+│  Kafka → [Storage Consumer → TimescaleDB]           │
+│       ↓  [Elasticsearch Consumer → OpenSearch]      │
+│       ↓  [Alert Engine → Notifications]             │
+│       ↓  [Metrics Consumer]                         │
+│                                                      │
+│  Query API ← [TimescaleDB + OpenSearch + MinIO]     │
+│                                                      │
+│  Monitoring: [Prometheus → Grafana Dashboards]      │
+│  Analytics:  [Metabase BI → Executive Reports]      │
+│  Logging:    [Promtail → Loki]                      │
+└─────────────────────────────────────────────────────┘
 ```
 
-**See:** [docs/ALPR_Pipeline/SERVICES_OVERVIEW.md](docs/ALPR_Pipeline/SERVICES_OVERVIEW.md) for complete architecture details.
+**See:** [docs/alpr/services-overview.md](docs/alpr/services-overview.md) for complete architecture details.
 
 ---
 
@@ -140,10 +152,12 @@ python3 pilot.py --help
 | **OCR** | PaddleOCR | License plate text recognition |
 | **Tracking** | ByteTrack | Multi-object tracking |
 | **Messaging** | Apache Kafka + Schema Registry | Event streaming with Avro |
-| **Database** | TimescaleDB (PostgreSQL 16) | Time-series storage |
+| **SQL Database** | TimescaleDB (PostgreSQL 16) | Time-series storage |
+| **Search Engine** | OpenSearch | Full-text search & analytics |
 | **Object Storage** | MinIO | S3-compatible image storage |
 | **API** | FastAPI | REST endpoints |
 | **Monitoring** | Prometheus + Grafana + Loki | Metrics and logs |
+| **Analytics** | Metabase | Business intelligence & reports |
 | **Alerting** | Alert Engine | Multi-channel notifications |
 | **Deployment** | Docker Compose | Container orchestration |
 
@@ -267,22 +281,25 @@ KAFKA_TOPIC=alpr.plates.detected
 
 ## 🚦 Current Status
 
-**Phase 2: Production-Ready Distributed Architecture**
+**Phase 4: Enterprise-Grade System (COMPLETE ✨)**
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Edge Processing | ✅ Complete | TensorRT optimized |
-| Kafka Messaging | ✅ Complete | Event streaming with Avro |
-| Database Storage | ✅ Complete | TimescaleDB with hypertables |
-| Query API | ✅ Complete | FastAPI with docs |
-| Docker Deployment | ✅ Complete | All services containerized |
+| Kafka Messaging | ✅ Complete | Multi-topic architecture with Avro |
+| SQL Database | ✅ Complete | TimescaleDB with hypertables |
+| Search Engine | ✅ Complete | OpenSearch with full-text search |
+| Query API | ✅ Complete | FastAPI with SQL + search endpoints |
+| Docker Deployment | ✅ Complete | 28 services containerized |
 | Object Storage | ✅ Complete | MinIO with async uploads |
 | Monitoring Stack | ✅ Complete | Prometheus + Grafana + Loki |
-| Alert Engine | ✅ Complete | Multi-channel notifications |
+| Business Intelligence | ✅ Complete | Metabase analytics & reports |
+| Alert Engine | ✅ Complete | Multi-channel notifications + DLQ |
+| Error Handling | ✅ Complete | Dead Letter Queue + retry logic |
 
-**Overall:** 90% of core features complete, production-ready system
+**Overall:** 95% complete - Enterprise-grade ALPR system ready for production
 
-**See:** [docs/ALPR_Pipeline/Project_Status.md](docs/ALPR_Pipeline/Project_Status.md)
+**See:** [docs/alpr/project-status.md](docs/alpr/project-status.md)
 
 ---
 
@@ -294,19 +311,27 @@ KAFKA_TOPIC=alpr.plates.detected
 - ✅ Alert engine (Email, Slack, Webhook, SMS)
 - ✅ Pre-configured Grafana dashboards
 
-### Phase 4: Enterprise Features (Next Priority)
-- Advanced BI dashboards and analytics
-- Elasticsearch for full-text search
-- Multi-site deployment orchestration
-- Advanced reporting and data retention policies
+### ✅ Phase 4: Enterprise Features (COMPLETE ✨)
+- ✅ OpenSearch for full-text search and analytics
+- ✅ Multi-topic Kafka architecture (plates, vehicles, metrics, DLQ)
+- ✅ Advanced BI dashboards (Metabase)
+- ✅ Dead Letter Queue with retry logic
+- ✅ OpenSearch Dashboards for visualization
+- ✅ Extended Query API with search endpoints
 
-### Phase 5: Scale Optimization (Future)
+### Phase 5: Scale Optimization (Optional)
 - DeepStream migration (6-8x throughput)
 - Triton Inference Server
 - Kubernetes deployment
 - Multi-region replication
 
-**See:** [docs/ALPR_Pipeline/ALPR_Next_Steps.md](docs/ALPR_Pipeline/ALPR_Next_Steps.md)
+### Phase 6: Advanced MLOps (Optional)
+- Model registry (MLflow)
+- Automated training pipeline (TAO Toolkit)
+- A/B testing framework
+- Model versioning and rollback
+
+**See:** [docs/alpr/next-steps.md](docs/alpr/next-steps.md)
 
 ---
 
@@ -318,11 +343,29 @@ KAFKA_TOPIC=alpr.plates.detected
 # Get last 10 events
 curl http://localhost:8000/events/recent?limit=10
 
-# Search by plate
+# Search by plate (SQL)
 curl http://localhost:8000/events/plate/ABC1234
 
 # Get database statistics
 curl http://localhost:8000/stats
+```
+
+### Search Endpoints (OpenSearch)
+
+```bash
+# Full-text search
+curl "http://localhost:8000/search/fulltext?q=ABC&limit=10"
+
+# Faceted search (filter by camera, confidence, etc.)
+curl "http://localhost:8000/search/facets?camera_id=cam_01&min_confidence=0.9"
+
+# Analytics aggregations (top plates, trends)
+curl "http://localhost:8000/search/analytics?agg_type=top_plates&size=10"
+
+# Advanced query with filters
+curl -X POST "http://localhost:8000/search/query" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "ABC", "filters": {"camera_id": "cam_01"}}'
 ```
 
 ### Interactive API Documentation
@@ -383,14 +426,32 @@ http://localhost:8080
 
 # Database queries
 docker exec -it alpr-timescaledb psql -U alpr -d alpr_db
+
+# OpenSearch cluster health
+curl http://localhost:9200/_cluster/health
+```
+
+### Dashboards & Analytics
+
+```bash
+# Grafana dashboards (operational metrics)
+http://localhost:3000
+Login: admin / alpr_admin_2024
+
+# Metabase BI (business analytics)
+http://localhost:3001
+Setup admin account on first access
+
+# OpenSearch Dashboards (search visualization)
+http://localhost:5601
+
+# Prometheus metrics explorer
+http://localhost:9090
 ```
 
 ### System Metrics
 
 ```bash
-# Grafana dashboards (comprehensive metrics)
-http://localhost:3000
-
 # Prometheus metrics
 curl http://localhost:9090/api/v1/targets
 
@@ -404,6 +465,9 @@ docker stats
 curl http://localhost:8001/metrics  # Pilot (edge)
 curl http://localhost:8000/metrics  # Query API
 curl http://localhost:8003/metrics  # Alert Engine
+curl http://localhost:8004/metrics  # Elasticsearch Consumer
+curl http://localhost:8005/metrics  # DLQ Consumer
+curl http://localhost:8006/metrics  # Metrics Consumer
 curl http://localhost:8082/metrics  # cAdvisor
 
 # View recent events
@@ -434,7 +498,7 @@ Proprietary - Enterprise Use Only
 
 - **Project Lead:** Azhundev
 - **AI Assistant:** Claude Code (Anthropic)
-- **Documentation:** 2025-12-23
+- **Documentation:** Last updated 2026-01-06
 
 ---
 

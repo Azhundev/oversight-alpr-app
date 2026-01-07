@@ -41,7 +41,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 ## System Summary
 
-**Total Services**: 17 core services + 7 infrastructure services + 5 monitoring services
+**Total Services**: 17 core services + 7 infrastructure services + 6 monitoring/analytics services = **30 services total**
 
 **Edge Processing** (pilot.py):
 1. Camera Ingestion Service
@@ -73,9 +73,10 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 - MinIO (S3-compatible object storage)
 - OpenSearch (full-text search and analytics engine)
 
-**Monitoring Stack** (Docker):
+**Monitoring & Analytics Stack** (Docker):
 - Prometheus (metrics collection and storage)
 - Grafana (metrics visualization and dashboards)
+- Metabase (business intelligence and analytics)
 - Loki (log aggregation)
 - Promtail (log shipping)
 - cAdvisor (container resource metrics)
@@ -90,10 +91,12 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 - Full-text search with fuzzy matching
 - Faceted search and drill-down queries
 - Real-time analytics and aggregations
+- Advanced business intelligence dashboards (Metabase)
 - Multi-channel alert notifications
 - Dead Letter Queue for robust error handling
 - Retry logic with exponential backoff (3 attempts)
 - Timeout detection (30-second maximum)
+- Auto-reconnection to backend services (Kafka/MinIO)
 - Comprehensive monitoring and logging
 
 **Technology Stack**:
@@ -1315,6 +1318,22 @@ TWILIO_AUTH_TOKEN=your_twilio_auth_token
 - **Kafka & Database** - Message consumption, DB operations
 - **Logs Explorer** - Centralized log search
 
+**Metabase** (`metabase/metabase:latest`)
+- Business intelligence and analytics
+- Port: 3001
+- Container: `alpr-metabase`
+- Setup required: Create admin account on first access
+- Database: Connected to TimescaleDB for ALPR data analysis
+
+**Key Features**:
+- User-friendly drag-and-drop dashboard builder
+- Custom SQL query interface
+- Pre-built dashboard templates (Executive Overview, Camera Performance, Quality Reports, Time Analytics)
+- Scheduled email reports
+- Parameterized queries for flexible reporting
+- Complements Grafana (real-time metrics) and OpenSearch Dashboards (search)
+- 20+ sample SQL queries for business intelligence
+
 **Loki** (`grafana/loki:latest`)
 - Log aggregation system
 - Port: 3100
@@ -1353,6 +1372,7 @@ TWILIO_AUTH_TOKEN=your_twilio_auth_token
 
 **Access URLs**:
 - Grafana: http://localhost:3000
+- Metabase: http://localhost:3001
 - Prometheus: http://localhost:9090
 - Loki: http://localhost:3100 (API only)
 - cAdvisor: http://localhost:8082

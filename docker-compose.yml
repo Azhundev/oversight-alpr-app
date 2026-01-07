@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ZooKeeper - Required for Kafka coordination
   zookeeper:
@@ -346,6 +344,40 @@ services:
       timeout: 10s
       retries: 3
 
+  # Metabase - Advanced BI and Analytics
+  metabase:
+    image: metabase/metabase:latest
+    container_name: alpr-metabase
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    ports:
+      - "3001:3000"
+    environment:
+      # Database for Metabase application data (H2 embedded by default)
+      MB_DB_TYPE: h2
+      MB_DB_FILE: /metabase-data/metabase.db
+      # Performance settings
+      JAVA_OPTS: -Xmx512m
+      # Site settings
+      MB_SITE_NAME: "ALPR Analytics"
+      MB_SITE_URL: "http://localhost:3001"
+      # Disable anonymous access
+      MB_ANON_TRACKING_ENABLED: false
+    volumes:
+      - metabase-data:/metabase-data
+    networks:
+      - alpr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
   # Loki - Log aggregation
   loki:
     image: grafana/loki:latest
@@ -562,6 +594,10 @@ volumes:
 
   # Search & analytics volumes
   opensearch-data:
+    driver: local
+
+  # BI & Analytics volumes
+  metabase-data:
     driver: local
 
 networks:

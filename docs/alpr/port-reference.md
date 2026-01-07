@@ -17,6 +17,7 @@ Complete reference of all ports used by the ALPR pipeline components.
 | MinIO Console | 9001 | 9001 | HTTP | MinIO web UI | http://localhost:9001 |
 | OpenSearch | 9200 | 9200 | HTTP | Search engine API | http://localhost:9200 |
 | OpenSearch (Internal) | 9600 | 9600 | TCP | OpenSearch internal comm | - |
+| OpenSearch Dashboards | 5601 | 5601 | HTTP | Search visualization UI | http://localhost:5601 |
 | **Application Services** |
 | Query API | 8000 | 8000 | HTTP | REST API for queries | http://localhost:8000 |
 | Query API Metrics | 8000 | 8000 | HTTP | Prometheus metrics | http://localhost:8000/metrics |
@@ -32,10 +33,12 @@ Complete reference of all ports used by the ALPR pipeline components.
 | Loki | 3100 | 3100 | HTTP | Log aggregation | http://localhost:3100 |
 | Promtail | 9080 | - | HTTP | Log shipping (internal) | - |
 | cAdvisor | 8080 | 8082 | HTTP | Container metrics | http://localhost:8082 |
+| **BI & Analytics** |
+| Metabase | 3000 | 3001 | HTTP | Advanced BI and reporting | http://localhost:3001 |
 
 ## Port Groups
 
-### Core Data Infrastructure (Ports 2181, 5432, 9000-9001, 9092, 9101, 9200, 9600)
+### Core Data Infrastructure (Ports 2181, 5432, 5601, 9000-9001, 9092, 9101, 9200, 9600)
 Critical services that handle data storage and messaging:
 - **ZooKeeper (2181)**: Kafka cluster coordination
 - **Kafka (9092)**: Message broker for plate detection events
@@ -43,6 +46,7 @@ Critical services that handle data storage and messaging:
 - **TimescaleDB (5432)**: Time-series database for plate records (SQL)
 - **OpenSearch (9200)**: Search engine for full-text search and analytics (NoSQL)
 - **OpenSearch Internal (9600)**: OpenSearch cluster communication
+- **OpenSearch Dashboards (5601)**: Web interface for OpenSearch visualization
 - **MinIO API (9000)**: S3-compatible storage for plate images
 - **MinIO Console (9001)**: Web interface for MinIO management
 
@@ -61,9 +65,10 @@ ALPR application services:
 - **Kafka Consumer (8002)**: Storage service internal metrics endpoint
 - **ALPR Pilot (8001)**: Edge processing metrics
 
-### Monitoring Stack (Ports 3000, 8082, 9090, 3100)
-Observability infrastructure:
+### Monitoring Stack (Ports 3000, 3001, 3100, 8082, 9090)
+Observability and analytics infrastructure:
 - **Grafana (3000)**: Main monitoring dashboard
+- **Metabase (3001)**: Advanced BI and analytics
 - **Prometheus (9090)**: Metrics database and query engine
 - **Loki (3100)**: Log aggregation backend
 - **cAdvisor (8082)**: Container resource metrics
@@ -94,6 +99,9 @@ OpenSearch:         http://localhost:9200
   Indices:          http://localhost:9200/_cat/indices?v
   (No authentication - security disabled)
 
+OpenSearch Dashboards: http://localhost:5601
+  (No authentication)
+
 Query API:          http://localhost:8000
   Health Check:     http://localhost:8000/health
   API Docs:         http://localhost:8000/docs
@@ -107,9 +115,15 @@ Grafana:            http://localhost:3000
   Username: admin
   Password: alpr_admin_2024
 
+Metabase:           http://localhost:3001
+  (Setup required on first access - create admin account)
+
 Prometheus:         http://localhost:9090
   Targets:          http://localhost:9090/targets
   Alerts:           http://localhost:9090/alerts
+
+OpenSearch Dashboards: http://localhost:5601
+  (No authentication - visualization & analytics)
 
 cAdvisor:           http://localhost:8082
   (No authentication)
@@ -176,6 +190,7 @@ If running on a remote server, open these ports:
 **Optional (Enhanced monitoring)**:
 - `8080` - Kafka UI
 - `9001` - MinIO Console
+- `5601` - OpenSearch Dashboards
 - `9090` - Prometheus
 - `8082` - cAdvisor
 - `8003` - Alert Engine metrics
@@ -277,7 +292,7 @@ SCHEMA_REGISTRY_URL: http://schema-registry:8081
 sudo netstat -tulpn | grep :8080
 
 # Check all ALPR-related ports
-sudo netstat -tulpn | grep -E ':(8000|8001|8002|8003|8004|8080|8081|8082|3000|5432|9000|9001|9090|9092|9200|9600)'
+sudo netstat -tulpn | grep -E ':(8000|8001|8002|8003|8004|8080|8081|8082|3000|3001|5432|5601|9000|9001|9090|9092|9200|9600)'
 ```
 
 ### Verify Docker Port Mappings
@@ -369,6 +384,7 @@ Data:
   MinIO Console:   http://localhost:9001
   Schema Registry: http://localhost:8081
   OpenSearch:      http://localhost:9200
+  OpenSearch UI:   http://localhost:5601
 
 API:
   Query API:       http://localhost:8000
@@ -378,6 +394,7 @@ API:
 
 Monitoring:
   Grafana:         http://localhost:3000
+  Metabase:        http://localhost:3001
   Prometheus:      http://localhost:9090
   cAdvisor:        http://localhost:8082
 

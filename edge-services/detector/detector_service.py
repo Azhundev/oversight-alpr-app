@@ -13,6 +13,7 @@ from typing import List, Dict, Tuple, Optional
 from pathlib import Path
 import time
 import json
+import gc
 
 from shared.schemas.event import BoundingBox, VehicleDetection
 
@@ -45,6 +46,15 @@ class YOLOv11Detector:
             int8: Use INT8 precision for even faster inference (requires calibration)
             batch_size: Batch size for inference
         """
+        # Clear memory before initialization to prevent OOM errors
+        gc.collect()
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.empty_cache()
+                logger.debug("Cleared CUDA cache before detector initialization")
+            except RuntimeError as e:
+                logger.debug(f"CUDA cache clear failed (expected on low memory): {e}")
+
         self.device = device
         self.use_tensorrt = use_tensorrt
         self.fp16 = fp16
@@ -83,14 +93,28 @@ class YOLOv11Detector:
 
         TensorRT engines are cached and reused across runs
         """
+        # Force garbage collection and clear CUDA cache before loading model
+        # This prevents memory fragmentation issues on Jetson
+        gc.collect()
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.empty_cache()
+                logger.debug("Cleared CUDA cache before model loading")
+            except RuntimeError as e:
+                # On Jetson with low memory, CUDA cache operations might fail
+                # This is expected and we can continue
+                logger.debug(f"CUDA cache clear failed (expected on low memory): {e}")
 
         # Check if TensorRT engine already exists (avoids re-export)
-        if self.use_tensorrt and not model_path.endswith('.engine'):
-            # Look for cached .engine file (same name as .pt model)
+        # Ultralytics creates both .engine (TensorRT) and .onnx (intermediate) files
+        # Prefer .engine, fall back to .onnx if engine build failed
+        if self.use_tensorrt and not model_path.endswith(('.engine', '.onnx')):
+            # Look for cached .engine file first (true TensorRT engine)
             engine_path = str(Path(model_path).with_suffix('.engine'))
-            version_file = str(Path(model_path).with_suffix('.engine.version'))
+            onnx_path = str(Path(model_path).with_suffix('.onnx'))
+            version_file = str(Path(model_path).with_suffix('.version'))
 
-            # Check if engine exists and version matches
+            # Check if .engine file exists (preferred)
             if Path(engine_path).exists():
                 # Verify TensorRT version compatibility
                 current_trt_version = trt.__version__
@@ -114,19 +138,30 @@ class YOLOv11Detector:
                     logger.warning(f"No version file found for engine: {version_file}")
 
                 if engine_is_valid:
-                    logger.info(f"Loading existing TensorRT engine: {engine_path}")
+                    logger.info(f"Loading existing TensorRT .engine file: {engine_path}")
                     try:
                         model = YOLO(engine_path)
                         return model
                     except Exception as e:
-                        logger.warning(f"Failed to load TensorRT engine: {e}")
+                        logger.warning(f"Failed to load TensorRT .engine: {e}")
                         engine_is_valid = False
 
                 if not engine_is_valid:
-                    logger.warning(f"Deleting incompatible engine and rebuilding: {engine_path}")
+                    logger.warning(f"Deleting incompatible .engine and rebuilding: {engine_path}")
                     Path(engine_path).unlink(missing_ok=True)
                     Path(version_file).unlink(missing_ok=True)
                     # Will rebuild below
+
+            # Check if .onnx file exists without .engine (incomplete/failed export)
+            elif Path(onnx_path).exists():
+                logger.warning(
+                    f"Found orphaned .onnx file without .engine - previous TensorRT build incomplete.\n"
+                    f"  Deleting .onnx and rebuilding TensorRT engine: {onnx_path}"
+                )
+                # Clean up incomplete export and rebuild
+                Path(onnx_path).unlink(missing_ok=True)
+                logger.info(f"Building new TensorRT engine: {engine_path}")
+
             else:
                 logger.info(f"No existing TensorRT engine found, will create: {engine_path}")
 
@@ -135,7 +170,7 @@ class YOLOv11Detector:
 
         # Export to TensorRT if enabled (Jetson-specific optimization)
         # TensorRT significantly improves inference speed on Jetson hardware
-        if self.use_tensorrt and not model_path.endswith('.engine'):
+        if self.use_tensorrt and not model_path.endswith(('.engine', '.onnx')):
             try:
                 if self.int8:
                     logger.info("Exporting model to TensorRT with INT8 precision...")
@@ -160,7 +195,7 @@ class YOLOv11Detector:
                         half=self.fp16,  # Enable FP16 precision
                         device=self.device,
                         batch=self.batch_size,
-                        workspace=1,  # 1GB workspace (reduced to prevent OOM on Jetson)
+                        workspace=0.5,  # 512MB workspace (minimized to prevent OOM on Jetson)
                     )
                 logger.success(f"TensorRT engine created: {engine_path}")
 
@@ -185,7 +220,7 @@ class YOLOv11Detector:
                 logger.warning(f"TensorRT export failed: {e}. Using PyTorch model.")
 
         # Move PyTorch model to GPU (TensorRT engines don't support .to())
-        if not str(model_path).endswith('.engine'):
+        if not str(model_path).endswith(('.engine', '.onnx')):
             try:
                 model.to(self.device)
             except:
@@ -426,6 +461,16 @@ class YOLOv11Detector:
         Warmup model for consistent inference times
         Important for TensorRT engines
         """
+        # Force garbage collection and clear CUDA cache before warmup
+        # This ensures maximum available memory for model fusion and inference
+        gc.collect()
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.empty_cache()
+                logger.debug("Cleared CUDA cache before warmup")
+            except RuntimeError as e:
+                logger.debug(f"CUDA cache clear failed (expected on low memory): {e}")
+
         logger.info(f"Warming up detector ({iterations} iterations)...")
         dummy_frame = np.zeros((640, 640, 3), dtype=np.uint8)
 

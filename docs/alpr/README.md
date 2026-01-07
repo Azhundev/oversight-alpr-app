@@ -40,6 +40,7 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
 | **MinIO** | Docker Container | S3-compatible object storage for images |
 | **Prometheus** | Docker Container | Metrics collection and storage |
 | **Grafana** | Docker Container | Metrics visualization dashboards |
+| **Metabase** | Docker Container | Business intelligence and analytics |
 | **Loki** | Docker Container | Log aggregation system |
 | **Promtail** | Docker Container | Log shipping agent |
 | **cAdvisor** | Docker Container | Container resource metrics |
@@ -151,6 +152,7 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
   - 9092 (Kafka)
   - 9200/9600 (OpenSearch)
   - 3000 (Grafana)
+  - 3001 (Metabase)
   - 9090 (Prometheus)
   - RTSP camera streams (if using IP cameras)
 
@@ -224,6 +226,7 @@ python3 pilot.py --no-display --frame-skip 2
 - **Query API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 - **Grafana Dashboards**: http://localhost:3000 (user: admin, password: alpr_admin_2024)
+- **Metabase Analytics**: http://localhost:3001 (create admin account on first access)
 - **Prometheus**: http://localhost:9090
 - **Kafka UI**: http://localhost:8080
 - **MinIO Console**: http://localhost:9001 (user: alpr_minio, password: alpr_minio_secure_pass_2024)
@@ -402,9 +405,17 @@ The system includes a complete monitoring stack for production deployments:
 - **Alert Engine** - Alert processing, notification delivery
 - **Logs Explorer** - Centralized log search and filtering
 
+**Metabase Business Intelligence** (http://localhost:3001):
+- Executive Overview Dashboard - Total reads, trends, top plates, vehicle types
+- Camera Performance Analysis - Reads per camera, confidence scores
+- Plate Recognition Quality Reports - Confidence distribution, quality trends
+- Time-based Analytics - Peak hours, day-of-week patterns, busiest times
+- Custom SQL queries for ad-hoc analysis
+- Scheduled email reports for stakeholders
+
 **Access**:
-- URL: http://localhost:3000
-- Login: `admin` / `alpr_admin_2024`
+- Grafana: http://localhost:3000 (Login: `admin` / `alpr_admin_2024`)
+- Metabase: http://localhost:3001 (Create admin account on first access)
 
 **Key Metrics**:
 - Current FPS and processing latency

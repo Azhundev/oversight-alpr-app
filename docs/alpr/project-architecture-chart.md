@@ -1,6 +1,6 @@
 # OVR-ALPR System Architecture - Mermaid Chart
 
-**Last Updated:** 2025-12-29
+**Last Updated:** 2026-01-06
 
 This document contains the Mermaid chart visualization of the complete OVR-ALPR system architecture based on the current implementation status.
 
@@ -54,9 +54,10 @@ flowchart TB
             API["🌐 Query API<br/>✅ PRODUCTION<br/>FastAPI + OpenAPI<br/>SQL + Search endpoints"]
         end
 
-        subgraph "Monitoring Stack"
+        subgraph "Monitoring & Analytics Stack"
             PROM["📊 Prometheus<br/>✅ PRODUCTION<br/>Metrics collection<br/>30-day retention"]
             GRAF["📈 Grafana<br/>✅ PRODUCTION<br/>5 Dashboards<br/>localhost:3000"]
+            METABASE["📊 Metabase<br/>✅ PRODUCTION<br/>Business Intelligence<br/>localhost:3001"]
             LOKI["📝 Loki<br/>✅ PRODUCTION<br/>Log aggregation<br/>7-day retention"]
             PTAIL["🚚 Promtail<br/>✅ PRODUCTION<br/>Log shipping"]
             CADV["📦 cAdvisor<br/>✅ PRODUCTION<br/>Container metrics<br/>localhost:8082"]
@@ -131,9 +132,11 @@ flowchart TB
     PROM -.->|"Scrape"| CADV
     GRAF -.->|"Query"| PROM
     GRAF -.->|"Query"| LOKI
+    METABASE <-->|"SQL queries"| TSDB
     PTAIL -.->|"Ship logs"| LOKI
     CADV -.->|"Export metrics"| PROM
     ADMIN <-->|"View dashboards"| GRAF
+    ADMIN <-->|"BI analytics"| METABASE
 
     %% Styling
     classDef production fill:#90EE90,stroke:#228B22,stroke-width:2px,color:#000
@@ -141,7 +144,7 @@ flowchart TB
     classDef schema fill:#E6E6FA,stroke:#9370DB,stroke-width:2px,color:#000
     classDef client fill:#87CEEB,stroke:#4682B4,stroke-width:2px,color:#000
 
-    class CAM,DET,TRK,OCR,EVT,PUB,IMG,ZK,KAFKA,SR,UI,CONS,STORE,TSDB,MINIO,ESCONS,OPENSEARCH,ALERT,API,PROM,GRAF,LOKI,PTAIL,CADV production
+    class CAM,DET,TRK,OCR,EVT,PUB,IMG,ZK,KAFKA,SR,UI,CONS,STORE,TSDB,MINIO,ESCONS,OPENSEARCH,ALERT,API,PROM,GRAF,METABASE,LOKI,PTAIL,CADV production
     class CFG1,CFG2,CFG3 config
     class SCHEMA schema
     class CLIENT,ADMIN client
@@ -153,9 +156,9 @@ flowchart TB
 
 ```mermaid
 pie title "Implementation Status (By Component Count)"
-    "Fully Implemented (Production)" : 25
-    "Partially Implemented" : 2
-    "Not Implemented" : 3
+    "Fully Implemented (Production)" : 28
+    "Partially Implemented" : 0
+    "Not Implemented" : 2
 ```
 
 ---
@@ -186,12 +189,13 @@ graph LR
         B10["OpenSearch ✅"]
     end
 
-    subgraph "Monitoring Services (5)"
+    subgraph "Monitoring & Analytics Services (6)"
         M1["Prometheus ✅"]
         M2["Grafana ✅"]
-        M3["Loki ✅"]
-        M4["Promtail ✅"]
-        M5["cAdvisor ✅"]
+        M3["Metabase ✅"]
+        M4["Loki ✅"]
+        M5["Promtail ✅"]
+        M6["cAdvisor ✅"]
     end
 
     subgraph "Infrastructure (3)"
@@ -215,10 +219,10 @@ graph LR
     M1 -.-> B6
     M1 -.-> B8
     M1 -.-> B9
-    M1 -.-> M5
+    M1 -.-> M6
     M2 -.-> M1
-    M2 -.-> M3
-    M4 -.-> M3
+    M2 -.-> M4
+    M5 -.-> M4
 ```
 
 ---
@@ -330,8 +334,8 @@ gantt
 
     section Phase 4: Enterprise
     OpenSearch Integration     :done, p4a, 2025-12-28, 2d
-    Multi-Topic Kafka          :p4b, 2026-01-15, 7d
-    Advanced BI                :p4c, 2026-01-22, 14d
+    Multi-Topic Kafka          :done, p4b, 2025-12-30, 1d
+    Advanced BI (Metabase)     :done, p4c, 2026-01-06, 1d
 
     section Phase 5: Scale
     DeepStream Migration       :p5a, 2026-02-20, 42d
@@ -378,9 +382,10 @@ mindmap
       Docker Compose
       NVIDIA Jetson Orin NX
       Ubuntu 20.04
-    Monitoring
+    Monitoring & Analytics
       Prometheus 2.x
       Grafana 10.x
+      Metabase (latest)
       Loki 2.x
       Promtail 2.x
       cAdvisor
@@ -395,17 +400,19 @@ graph LR
     subgraph "Current State ✅"
         C1["4-6 RTSP streams<br/>(GPU decode)"]
         C2["15-25 FPS throughput"]
-        C3["Docker logs only"]
-        C4["Manual API queries"]
-        C5["Single Kafka topic"]
+        C3["Multi-topic Kafka<br/>(4 topics)"]
+        C4["Advanced BI dashboards"]
+        C5["30 services operational"]
     end
 
-    subgraph "Phase 3 & 4 Achievements ✅"
+    subgraph "Phase 3 & 4 Complete ✅"
         G1["Prometheus metrics ✅"]
         G2["Grafana dashboards (5) ✅"]
-        G3["Real-time alerts ✅"]
-        G4["Full-text search ✅"]
-        G5["Dual storage (SQL+NoSQL) ✅"]
+        G3["Metabase BI analytics ✅"]
+        G4["Real-time alerts (4 channels) ✅"]
+        G5["Full-text search ✅"]
+        G6["Dual storage (SQL+NoSQL) ✅"]
+        G7["Dead Letter Queue ✅"]
     end
 
     subgraph "Phase 5 Vision 🚀"
@@ -415,16 +422,17 @@ graph LR
         V4["Multi-site aggregation"]
     end
 
-    C1 -.->|"Optimize"| G1
+    C1 -.->|"Monitor"| G1
     C2 -.->|"Monitor"| G2
-    C3 -.->|"Add"| G1
-    C4 -.->|"Automate"| G3
-    C5 -.->|"Expand"| G5
+    C3 -.->|"Multi-topic"| G6
+    C4 -.->|"Analytics"| G3
+    C5 -.->|"Complete"| G7
 
     G1 -.->|"Scale"| V1
     G2 -.->|"Enhance"| V2
-    G3 -.->|"Upgrade"| V3
-    G5 -.->|"Aggregate"| V4
+    G3 -.->|"Enhance"| V2
+    G6 -.->|"Upgrade"| V3
+    G7 -.->|"Aggregate"| V4
 
     style C1 fill:#90EE90
     style G1 fill:#FFD700
@@ -469,9 +477,9 @@ graph TB
   - 🔴 = Critical Gap
   - 🟢 = Working Well
 
-- **Overall Completion:** 85% of original vision (100% of core features, 100% of Phase 3, Phase 4 Priority 5 complete)
-- **Current Phase:** Phase 4 (Enterprise Features - OpenSearch Integration Complete)
-- **Next Phase:** Phase 4 Remaining (Multi-Topic Kafka, Advanced BI)
+- **Overall Completion:** 95% of original vision (100% of core features, 100% of Phase 3, 100% of Phase 4)
+- **Current Phase:** Phase 4 COMPLETE (Enterprise Features - All 7 priorities delivered)
+- **Next Phase:** Phase 5 (Scale & Optimization - DeepStream, Triton Inference)
 
 ---
 

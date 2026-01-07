@@ -194,6 +194,18 @@ class ALPRPilot:
             dedup_time_window_seconds=300,  # Time window for deduplication (5 minutes)
         )
 
+        # Auto-reconnection state
+        self.kafka_last_reconnect_attempt = 0
+        self.minio_last_reconnect_attempt = 0
+        self.kafka_reconnect_interval = 30  # Try reconnecting every 30 seconds
+        self.minio_reconnect_interval = 30
+        self.kafka_bootstrap_servers = "localhost:9092"
+        self.kafka_schema_registry_url = "http://localhost:8081"
+        self.minio_endpoint = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+        self.minio_access_key = os.getenv("MINIO_ACCESS_KEY", "alpr_minio")
+        self.minio_secret_key = os.getenv("MINIO_SECRET_KEY", "alpr_minio_secure_pass_2024")
+        self.minio_bucket = os.getenv("MINIO_BUCKET", "alpr-plate-images")
+
         # Initialize Kafka Publisher with Avro serialization and Schema Registry
         # Support both legacy single-topic and new multi-topic publishers
         use_multi_topic = os.getenv("KAFKA_USE_MULTI_TOPIC", "true").lower() == "true"
@@ -271,6 +283,115 @@ class ALPRPilot:
             logger.warning(f"⚠️  Failed to start Prometheus metrics server: {e}")
 
         logger.success("ALPR Pilot initialized successfully")
+
+    def _try_reconnect_kafka(self) -> bool:
+        """
+        Attempt to reconnect to Kafka if currently using MockKafkaPublisher
+        Returns True if connected (or already connected), False otherwise
+        """
+        # Check if we're using mock publisher
+        if not isinstance(self.kafka_publisher, MockKafkaPublisher):
+            return True  # Already connected
+
+        # Throttle reconnection attempts
+        current_time = time.time()
+        if current_time - self.kafka_last_reconnect_attempt < self.kafka_reconnect_interval:
+            return False  # Too soon to retry
+
+        self.kafka_last_reconnect_attempt = current_time
+
+        # Try to connect
+        logger.info("🔄 Attempting to connect to Kafka...")
+        try:
+            use_multi_topic = os.getenv("KAFKA_USE_MULTI_TOPIC", "true").lower() == "true"
+            enable_dual_publish = os.getenv("KAFKA_ENABLE_DUAL_PUBLISH", "false").lower() == "true"
+
+            if use_multi_topic:
+                from edge_services.event_processor.multi_topic_publisher import MultiTopicAvroPublisher
+                new_publisher = MultiTopicAvroPublisher(
+                    bootstrap_servers=self.kafka_bootstrap_servers,
+                    schema_registry_url=self.kafka_schema_registry_url,
+                    client_id="alpr-jetson-producer",
+                    compression_type="gzip",
+                    acks="all",
+                    enable_dual_publish=enable_dual_publish,
+                    legacy_topic="alpr.plates.detected",
+                )
+                logger.success(
+                    f"✅ Connected to Kafka (multi-topic mode)\n"
+                    f"   Bootstrap: {self.kafka_bootstrap_servers}\n"
+                    f"   Schema Registry: {self.kafka_schema_registry_url}"
+                )
+            else:
+                new_publisher = AvroKafkaPublisher(
+                    bootstrap_servers=self.kafka_bootstrap_servers,
+                    schema_registry_url=self.kafka_schema_registry_url,
+                    topic="alpr.plates.detected",
+                    schema_file="schemas/plate_event.avsc",
+                    client_id="alpr-jetson-producer",
+                    compression_type="gzip",
+                    acks="all",
+                )
+                logger.success(
+                    f"✅ Connected to Kafka (legacy single-topic mode)\n"
+                    f"   Bootstrap: {self.kafka_bootstrap_servers}\n"
+                    f"   Schema Registry: {self.kafka_schema_registry_url}"
+                )
+
+            # Replace mock publisher with real one
+            old_publisher = self.kafka_publisher
+            self.kafka_publisher = new_publisher
+
+            # Clean up old mock publisher
+            try:
+                old_publisher.close()
+            except:
+                pass
+
+            return True
+
+        except Exception as e:
+            logger.debug(f"Kafka connection failed (will retry in {self.kafka_reconnect_interval}s): {e}")
+            return False
+
+    def _try_reconnect_minio(self) -> bool:
+        """
+        Attempt to reconnect to MinIO if currently disconnected
+        Returns True if connected (or already connected), False otherwise
+        """
+        # Check if already connected
+        if self.image_storage is not None:
+            return True
+
+        # Throttle reconnection attempts
+        current_time = time.time()
+        if current_time - self.minio_last_reconnect_attempt < self.minio_reconnect_interval:
+            return False  # Too soon to retry
+
+        self.minio_last_reconnect_attempt = current_time
+
+        # Try to connect
+        logger.info("🔄 Attempting to connect to MinIO...")
+        try:
+            self.image_storage = ImageStorageService(
+                endpoint=self.minio_endpoint,
+                access_key=self.minio_access_key,
+                secret_key=self.minio_secret_key,
+                bucket_name=self.minio_bucket,
+                local_cache_dir=str(self.crops_dir.parent),
+                cache_retention_days=int(os.getenv("MINIO_CACHE_RETENTION_DAYS", "7")),
+                thread_pool_size=4,
+            )
+            logger.success(
+                f"✅ Connected to MinIO\n"
+                f"   Endpoint: {self.minio_endpoint}\n"
+                f"   Bucket: {self.minio_bucket}"
+            )
+            return True
+
+        except Exception as e:
+            logger.debug(f"MinIO connection failed (will retry in {self.minio_reconnect_interval}s): {e}")
+            return False
 
     def _init_plate_csv(self):
         """Initialize CSV file for plate reads"""
@@ -420,6 +541,8 @@ class ALPRPilot:
             vehicle_idx: Vehicle index for looking up attributes
         """
         try:
+            # Auto-reconnect to Kafka if currently using mock publisher
+            self._try_reconnect_kafka()
             # Get vehicle attributes
             vehicle_type = vehicle.vehicle_type if vehicle else "unknown"
             vehicle_color = vehicle.color if vehicle else None
@@ -529,6 +652,9 @@ class ALPRPilot:
             logger.success(f"💾 Saved plate crop: {date_folder}/{filename} (quality: {quality_score:.3f})")
 
             # Upload to MinIO asynchronously (after file is saved)
+            # Auto-reconnect to MinIO if currently disconnected
+            self._try_reconnect_minio()
+
             if self.image_storage:
                 try:
                     # Get plate text from cache if available
