@@ -85,7 +85,7 @@ Before creating dashboards, let's understand the ALPR database schema:
 
 | Table | Description | Key Columns |
 |-------|-------------|-------------|
-| `plate_reads` | Main ALPR events | event_id, plate_text, normalized_text, confidence, captured_at, camera_id, track_id |
+| `plate_events` | Main ALPR events | event_id, plate_text, plate_normalized_text, plate_confidence, captured_at, camera_id, track_id |
 | `cameras` | Camera metadata | camera_id, camera_name, location, status |
 | `vehicles` (optional) | Vehicle metadata | vehicle_id, vehicle_type, color, make, model |
 
@@ -93,14 +93,14 @@ Before creating dashboards, let's understand the ALPR database schema:
 
 1. **Click** "Browse Data" (top-right)
 2. **Select** "ALPR Database"
-3. **Click** "plate_reads" table
+3. **Click** "plate_events" table
 4. You'll see a preview of your ALPR events
 
 **Key Fields**:
 - `captured_at`: Timestamp of detection (use for time-based analysis)
 - `plate_text`: Raw OCR result
-- `normalized_text`: Cleaned plate number (use for searches/grouping)
-- `confidence`: OCR confidence score (0.0-1.0)
+- `plate_normalized_text`: Cleaned plate number (use for searches/grouping)
+- `plate_confidence`: OCR confidence score (0.0-1.0)
 - `camera_id`: Camera identifier
 - `track_id`: Vehicle tracking ID
 - `vehicle_type`: Type of vehicle (car, truck, etc.)
@@ -135,7 +135,7 @@ Now we'll add several cards to this dashboard.
 4. **SQL Query**:
 ```sql
 SELECT COUNT(*) as total_reads
-FROM plate_reads
+FROM plate_events
 WHERE captured_at >= CURRENT_DATE;
 ```
 5. **Click** "▶ Run"
@@ -153,7 +153,7 @@ WHERE captured_at >= CURRENT_DATE;
 SELECT
   DATE_TRUNC('hour', captured_at) as hour,
   COUNT(*) as reads
-FROM plate_reads
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '24 hours'
 GROUP BY hour
 ORDER BY hour;
@@ -172,12 +172,12 @@ ORDER BY hour;
 2. **SQL**:
 ```sql
 SELECT
-  normalized_text as plate,
+  plate_normalized_text as plate,
   COUNT(*) as occurrences,
-  AVG(confidence)::NUMERIC(4,2) as avg_confidence
-FROM plate_reads
+  AVG(plate_confidence)::NUMERIC(4,2) as avg_confidence
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '7 days'
-GROUP BY normalized_text
+GROUP BY plate_normalized_text
 ORDER BY occurrences DESC
 LIMIT 10;
 ```
@@ -197,7 +197,7 @@ LIMIT 10;
 SELECT
   camera_id,
   COUNT(*) as reads
-FROM plate_reads
+FROM plate_events
 WHERE captured_at >= CURRENT_DATE
 GROUP BY camera_id
 ORDER BY reads DESC;
@@ -216,8 +216,8 @@ ORDER BY reads DESC;
 2. **SQL**:
 ```sql
 SELECT
-  AVG(confidence)::NUMERIC(4,2) * 100 as avg_confidence_percent
-FROM plate_reads
+  AVG(plate_confidence)::NUMERIC(4,2) * 100 as avg_confidence_percent
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '24 hours';
 ```
 3. **Run** → **Visualization** → Number
@@ -235,7 +235,7 @@ WHERE captured_at >= NOW() - INTERVAL '24 hours';
 SELECT
   COALESCE(vehicle_type, 'unknown') as type,
   COUNT(*) as count
-FROM plate_reads
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '7 days'
 GROUP BY vehicle_type
 ORDER BY count DESC;
@@ -279,7 +279,7 @@ SELECT
   camera_id,
   DATE_TRUNC('hour', captured_at) as hour,
   COUNT(*) as reads
-FROM plate_reads
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '24 hours'
 GROUP BY camera_id, hour
 ORDER BY hour, camera_id;
@@ -290,9 +290,9 @@ Visualization: Line chart (multi-series)
 ```sql
 SELECT
   camera_id,
-  AVG(confidence)::NUMERIC(4,2) * 100 as avg_confidence,
+  AVG(plate_confidence)::NUMERIC(4,2) * 100 as avg_confidence,
   COUNT(*) as total_reads
-FROM plate_reads
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '7 days'
 GROUP BY camera_id
 ORDER BY avg_confidence DESC;
@@ -304,9 +304,9 @@ Visualization: Bar chart
 SELECT
   camera_id,
   COUNT(*) as low_confidence_reads,
-  (COUNT(*) * 100.0 / (SELECT COUNT(*) FROM plate_reads WHERE camera_id = pr.camera_id))::NUMERIC(4,2) as percentage
-FROM plate_reads pr
-WHERE confidence < 0.80
+  (COUNT(*) * 100.0 / (SELECT COUNT(*) FROM plate_events WHERE camera_id = pr.camera_id))::NUMERIC(4,2) as percentage
+FROM plate_events pr
+WHERE plate_confidence < 0.80
   AND captured_at >= NOW() - INTERVAL '7 days'
 GROUP BY camera_id
 ORDER BY low_confidence_reads DESC;
@@ -325,14 +325,14 @@ Visualization: Table
 ```sql
 SELECT
   CASE
-    WHEN confidence >= 0.95 THEN '95-100%'
-    WHEN confidence >= 0.90 THEN '90-95%'
-    WHEN confidence >= 0.80 THEN '80-90%'
-    WHEN confidence >= 0.70 THEN '70-80%'
+    WHEN plate_confidence >= 0.95 THEN '95-100%'
+    WHEN plate_confidence >= 0.90 THEN '90-95%'
+    WHEN plate_confidence >= 0.80 THEN '80-90%'
+    WHEN plate_confidence >= 0.70 THEN '70-80%'
     ELSE '< 70%'
   END as confidence_range,
   COUNT(*) as count
-FROM plate_reads
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '7 days'
 GROUP BY confidence_range
 ORDER BY confidence_range DESC;
@@ -343,10 +343,10 @@ Visualization: Bar chart
 ```sql
 SELECT
   DATE_TRUNC('day', captured_at) as day,
-  AVG(confidence)::NUMERIC(4,2) * 100 as avg_confidence,
-  MIN(confidence)::NUMERIC(4,2) * 100 as min_confidence,
-  MAX(confidence)::NUMERIC(4,2) * 100 as max_confidence
-FROM plate_reads
+  AVG(plate_confidence)::NUMERIC(4,2) * 100 as avg_confidence,
+  MIN(plate_confidence)::NUMERIC(4,2) * 100 as min_confidence,
+  MAX(plate_confidence)::NUMERIC(4,2) * 100 as max_confidence
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '30 days'
 GROUP BY day
 ORDER BY day;
@@ -366,7 +366,7 @@ Visualization: Line chart (multi-metric)
 SELECT
   EXTRACT(HOUR FROM captured_at) as hour_of_day,
   COUNT(*) as total_reads
-FROM plate_reads
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '7 days'
 GROUP BY hour_of_day
 ORDER BY hour_of_day;
@@ -379,7 +379,7 @@ SELECT
   TO_CHAR(captured_at, 'Day') as day_of_week,
   EXTRACT(DOW FROM captured_at) as dow_num,
   COUNT(*) as total_reads
-FROM plate_reads
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '30 days'
 GROUP BY day_of_week, dow_num
 ORDER BY dow_num;
@@ -392,7 +392,7 @@ SELECT
   camera_id,
   EXTRACT(HOUR FROM captured_at) as hour,
   COUNT(*) as reads
-FROM plate_reads
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '7 days'
 GROUP BY camera_id, hour
 ORDER BY reads DESC
@@ -476,14 +476,14 @@ For complex queries, use "Native query":
 **Example: Repeat Visitors (Seen 3+ times in 7 days)**:
 ```sql
 SELECT
-  normalized_text as plate,
+  plate_normalized_text as plate,
   COUNT(*) as visit_count,
   MIN(captured_at) as first_seen,
   MAX(captured_at) as last_seen,
   COUNT(DISTINCT camera_id) as unique_cameras
-FROM plate_reads
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '7 days'
-GROUP BY normalized_text
+GROUP BY plate_normalized_text
 HAVING COUNT(*) >= 3
 ORDER BY visit_count DESC;
 ```
@@ -494,8 +494,8 @@ Add variables to SQL queries:
 
 ```sql
 SELECT *
-FROM plate_reads
-WHERE normalized_text = {{plate_number}}
+FROM plate_events
+WHERE plate_normalized_text = {{plate_number}}
   AND captured_at >= {{start_date}}
   AND captured_at <= {{end_date}};
 ```
@@ -512,12 +512,12 @@ Ensure these indexes exist in TimescaleDB:
 
 ```sql
 -- Check existing indexes
-SELECT indexname FROM pg_indexes WHERE tablename = 'plate_reads';
+SELECT indexname FROM pg_indexes WHERE tablename = 'plate_events';
 
 -- Recommended indexes (if missing)
-CREATE INDEX idx_plate_reads_captured_at ON plate_reads(captured_at DESC);
-CREATE INDEX idx_plate_reads_camera_id ON plate_reads(camera_id);
-CREATE INDEX idx_plate_reads_normalized_text ON plate_reads(normalized_text);
+CREATE INDEX idx_plate_events_captured_at ON plate_events(captured_at DESC);
+CREATE INDEX idx_plate_events_camera_id ON plate_events(camera_id);
+CREATE INDEX idx_plate_events_normalized_text ON plate_events(plate_normalized_text);
 ```
 
 ### 2. Limit Date Ranges
@@ -615,10 +615,10 @@ Add comments to SQL queries:
 ```sql
 -- Get top 10 most frequent plates in last 7 days
 -- Used for identifying regular visitors or potential watchlist candidates
-SELECT normalized_text, COUNT(*) as visits
-FROM plate_reads
+SELECT plate_normalized_text, COUNT(*) as visits
+FROM plate_events
 WHERE captured_at >= NOW() - INTERVAL '7 days'
-GROUP BY normalized_text
+GROUP BY plate_normalized_text
 ORDER BY visits DESC
 LIMIT 10;
 ```
@@ -729,7 +729,7 @@ curl http://localhost:3001/api/health
 - Password: alpr_secure_pass
 
 **Key Tables**:
-- `plate_reads`: Main ALPR events
+- `plate_events`: Main ALPR events
 - `cameras`: Camera metadata
 
 ---

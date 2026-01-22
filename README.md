@@ -84,7 +84,7 @@ python3 pilot.py --help
                  │
                  ▼
 ┌─────────────────────────────────────────────────────┐
-│    BACKEND (Docker - 28 Services)                   │
+│    BACKEND (Docker - 30 Services)                   │
 │                                                      │
 │  Kafka → [Storage Consumer → TimescaleDB]           │
 │       ↓  [Elasticsearch Consumer → OpenSearch]      │
@@ -290,7 +290,7 @@ KAFKA_TOPIC=alpr.plates.detected
 | SQL Database | ✅ Complete | TimescaleDB with hypertables |
 | Search Engine | ✅ Complete | OpenSearch with full-text search |
 | Query API | ✅ Complete | FastAPI with SQL + search endpoints |
-| Docker Deployment | ✅ Complete | 28 services containerized |
+| Docker Deployment | ✅ Complete | 30 services containerized |
 | Object Storage | ✅ Complete | MinIO with async uploads |
 | Monitoring Stack | ✅ Complete | Prometheus + Grafana + Loki |
 | Business Intelligence | ✅ Complete | Metabase analytics & reports |
@@ -498,7 +498,7 @@ Proprietary - Enterprise Use Only
 
 - **Project Lead:** Azhundev
 - **AI Assistant:** Claude Code (Anthropic)
-- **Documentation:** Last updated 2026-01-06
+- **Documentation:** Last updated 2026-01-21
 
 ---
 
