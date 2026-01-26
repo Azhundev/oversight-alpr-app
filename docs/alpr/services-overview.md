@@ -41,7 +41,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 ## System Summary
 
-**Total Services**: 17 core services + 7 infrastructure services + 6 monitoring/analytics services = **30 services total**
+**Total Services**: 18 core services + 7 infrastructure services + 9 monitoring/analytics services = **34 services total**
 
 **Edge Processing** (pilot.py):
 1. Camera Ingestion Service
@@ -63,6 +63,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 15. Search Service (Full-text search and analytics)
 16. DLQ Consumer Service (Dead Letter Queue monitoring - Port 8005)
 17. Metrics Consumer Service (System metrics aggregation - Port 8006)
+18. Service Manager Dashboard (Start/Stop/Monitor services - Port 8000)
 
 **Infrastructure** (Docker):
 - Apache Kafka (message broker)
@@ -78,6 +79,11 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 - Grafana (metrics visualization and dashboards)
 - Metabase (business intelligence and analytics)
 - Loki (log aggregation)
+- Promtail (log shipping agent)
+- cAdvisor (container resource metrics)
+- Node Exporter (host system metrics - Port 9100)
+- Postgres Exporter (TimescaleDB metrics - Port 9187)
+- Kafka Exporter (Kafka broker metrics - Port 9308)
 - Promtail (log shipping)
 - cAdvisor (container resource metrics)
 

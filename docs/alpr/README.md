@@ -36,6 +36,7 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
 | **Metrics Consumer** | Docker Container | Aggregates system metrics from Kafka (Port 8006) |
 | **OpenSearch** | Docker Container | Full-text search and analytics engine |
 | **Query API** | Docker Container | REST API for SQL & search queries |
+| **Service Manager** | Docker Container | Web dashboard to start/stop/monitor services |
 | **Kafka UI** | Docker Container | Web interface for Kafka |
 | **MinIO** | Docker Container | S3-compatible object storage for images |
 | **Prometheus** | Docker Container | Metrics collection and storage |
@@ -44,6 +45,9 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
 | **Loki** | Docker Container | Log aggregation system |
 | **Promtail** | Docker Container | Log shipping agent |
 | **cAdvisor** | Docker Container | Container resource metrics |
+| **Node Exporter** | Docker Container | Host system metrics (Port 9100) |
+| **Postgres Exporter** | Docker Container | TimescaleDB metrics (Port 9187) |
+| **Kafka Exporter** | Docker Container | Kafka broker metrics (Port 9308) |
 
 ## Architecture
 

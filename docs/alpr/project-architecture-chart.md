@@ -1,6 +1,6 @@
 # OVR-ALPR System Architecture - Mermaid Chart
 
-**Last Updated:** 2026-01-21
+**Last Updated:** 2026-01-24
 
 This document contains the Mermaid chart visualization of the complete OVR-ALPR system architecture based on the current implementation status.
 
@@ -61,6 +61,13 @@ flowchart TB
             LOKI["📝 Loki<br/>✅ PRODUCTION<br/>Log aggregation<br/>7-day retention"]
             PTAIL["🚚 Promtail<br/>✅ PRODUCTION<br/>Log shipping"]
             CADV["📦 cAdvisor<br/>✅ PRODUCTION<br/>Container metrics<br/>localhost:8082"]
+            NODE["💻 Node Exporter<br/>✅ PRODUCTION<br/>Host metrics<br/>localhost:9100"]
+            PGEXP["🐘 Postgres Exporter<br/>✅ PRODUCTION<br/>DB metrics<br/>localhost:9187"]
+            KAFEXP["📊 Kafka Exporter<br/>✅ PRODUCTION<br/>Broker metrics<br/>localhost:9308"]
+        end
+
+        subgraph "Service Management"
+            SVCMGR["🎛️ Service Manager<br/>✅ PRODUCTION<br/>Start/Stop/Monitor<br/>localhost:8000/services"]
         end
     end
 
@@ -196,6 +203,13 @@ graph LR
         M4["Loki ✅"]
         M5["Promtail ✅"]
         M6["cAdvisor ✅"]
+        M7["Node Exporter ✅"]
+        M8["Postgres Exporter ✅"]
+        M9["Kafka Exporter ✅"]
+    end
+
+    subgraph "Management (1)"
+        SM1["Service Manager ✅"]
     end
 
     subgraph "Infrastructure (3)"
