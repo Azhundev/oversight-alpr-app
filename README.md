@@ -40,6 +40,7 @@ python3 pilot.py --help
 ### 3. Access Services
 
 - **Query API:** http://localhost:8000/docs (interactive API documentation)
+- **Service Manager:** http://localhost:8000/services/dashboard (start/stop services)
 - **Grafana Dashboards:** http://localhost:3000 (admin/alpr_admin_2024)
 - **Metabase BI:** http://localhost:3001 (business intelligence & analytics)
 - **OpenSearch Dashboards:** http://localhost:5601 (search visualization)
@@ -92,6 +93,7 @@ python3 pilot.py --help
 │       ↓  [Metrics Consumer]                         │
 │                                                      │
 │  Query API ← [TimescaleDB + OpenSearch + MinIO]     │
+│  Service Manager → [Start/Stop/Monitor Services]    │
 │                                                      │
 │  Monitoring: [Prometheus → Grafana Dashboards]      │
 │  Analytics:  [Metabase BI → Executive Reports]      │
@@ -159,6 +161,7 @@ python3 pilot.py --help
 | **Monitoring** | Prometheus + Grafana + Loki | Metrics and logs |
 | **Analytics** | Metabase | Business intelligence & reports |
 | **Alerting** | Alert Engine | Multi-channel notifications |
+| **Service Manager** | FastAPI + Docker API | Service orchestration dashboard |
 | **Deployment** | Docker Compose | Container orchestration |
 
 ---
@@ -421,6 +424,9 @@ docker compose logs -f kafka-consumer
 # API health check
 curl http://localhost:8000/health
 
+# Service Manager Dashboard
+http://localhost:8000/services/dashboard
+
 # Kafka UI
 http://localhost:8080
 
@@ -498,7 +504,7 @@ Proprietary - Enterprise Use Only
 
 - **Project Lead:** Azhundev
 - **AI Assistant:** Claude Code (Anthropic)
-- **Documentation:** Last updated 2026-01-21
+- **Documentation:** Last updated 2026-01-24
 
 ---
 

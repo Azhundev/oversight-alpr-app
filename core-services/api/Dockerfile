@@ -3,12 +3,18 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including Docker CLI for service management
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     curl \
+    gnupg \
+    lsb-release \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
@@ -21,6 +27,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY core-services/storage/ ./services/storage/
 COPY core-services/api/ ./services/api/
 COPY shared/ ./shared/
+
+# Copy service manager to root for import
+COPY core-services/api/service_manager.py ./service_manager.py
 
 # Set Python path
 ENV PYTHONPATH=/app

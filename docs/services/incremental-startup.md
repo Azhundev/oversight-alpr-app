@@ -6,6 +6,23 @@
 
 ---
 
+## 🎛️ NEW: Web Dashboard
+
+A visual Service Manager dashboard is now available for controlling services:
+
+**URL**: http://localhost:8000/services/dashboard
+
+Features:
+- Toggle switches for each service group
+- Real-time memory usage monitoring
+- Start/Stop/Restart buttons
+- Dependency validation
+- Auto-refresh status
+
+**See**: [Service Manager Documentation](service-manager.md) for full API details.
+
+---
+
 ## 🚀 Key Features
 
 ### Auto-Reconnection (NEW!)

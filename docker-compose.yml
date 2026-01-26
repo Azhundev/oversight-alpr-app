@@ -211,6 +211,7 @@ services:
     environment:
       MINIO_ROOT_USER: alpr_minio
       MINIO_ROOT_PASSWORD: alpr_minio_secure_pass_2024
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
@@ -267,6 +268,11 @@ services:
       MINIO_BUCKET: alpr-plate-images
       # OpenSearch configuration
       OPENSEARCH_HOSTS: http://opensearch:9200
+    volumes:
+      # Docker socket for Service Manager (incremental startup control)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Docker compose file for service control
+      - ./docker-compose.yml:/home/jetson/OVR-ALPR/docker-compose.yml:ro
     networks:
       - alpr-network
     restart: unless-stopped
@@ -409,6 +415,56 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./logs:/logs:ro
+    networks:
+      - alpr-network
+    restart: unless-stopped
+
+  # Node Exporter - Host system metrics (CPU, memory, disk, network)
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: alpr-node-exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - alpr-network
+    restart: unless-stopped
+
+  # Postgres Exporter - TimescaleDB/PostgreSQL metrics
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: alpr-postgres-exporter
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    ports:
+      - "9187:9187"
+    environment:
+      DATA_SOURCE_NAME: "postgresql://alpr:alpr_secure_pass@timescaledb:5432/alpr_db?sslmode=disable"
+    networks:
+      - alpr-network
+    restart: unless-stopped
+
+  # Kafka Exporter - Kafka broker and consumer group metrics
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: alpr-kafka-exporter
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "9308:9308"
+    command:
+      - '--kafka.server=kafka:29092'
+      - '--web.listen-address=:9308'
     networks:
       - alpr-network
     restart: unless-stopped

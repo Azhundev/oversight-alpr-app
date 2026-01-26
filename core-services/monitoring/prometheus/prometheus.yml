@@ -45,12 +45,29 @@ scrape_configs:
     scrape_interval: 10s
 
   # Query API (REST API)
-  # Runs in Docker, accessible via service name
-  - job_name: 'query-api'
-    static_configs:
-      - targets: ['query-api:8000']
-    metrics_path: '/metrics'
-    scrape_interval: 10s
+  # Note: Query API doesn't expose /metrics endpoint currently
+  # Uncomment when metrics endpoint is added
+  # - job_name: 'query-api'
+  #   static_configs:
+  #     - targets: ['query-api:8000']
+  #   metrics_path: '/metrics'
+  #   scrape_interval: 10s
+
+  # DLQ Consumer (Dead Letter Queue Handler)
+  # Uncomment when dlq-consumer service is started
+  # - job_name: 'dlq-consumer'
+  #   static_configs:
+  #     - targets: ['dlq-consumer:8005']
+  #   metrics_path: '/metrics'
+  #   scrape_interval: 10s
+
+  # Metrics Consumer (Metrics Aggregator)
+  # Uncomment when metrics-consumer service is started
+  # - job_name: 'metrics-consumer'
+  #   static_configs:
+  #     - targets: ['metrics-consumer:8006']
+  #   metrics_path: '/metrics'
+  #   scrape_interval: 10s
 
   # cAdvisor (Container Metrics)
   # Provides CPU/RAM/network metrics for all Docker containers
@@ -68,18 +85,33 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 30s
 
-  # TimescaleDB Postgres Exporter (Optional - if enabled)
-  # Uncomment if postgres_exporter is added to docker-compose
-  # - job_name: 'timescaledb'
-  #   static_configs:
-  #     - targets: ['postgres-exporter:9187']
-  #   metrics_path: '/metrics'
-  #   scrape_interval: 30s
+  # Node Exporter - Host system metrics (CPU, memory, disk, network)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
 
-  # Kafka Exporter (Optional - if enabled)
-  # Uncomment if kafka_exporter is added to docker-compose
-  # - job_name: 'kafka'
-  #   static_configs:
-  #     - targets: ['kafka-exporter:9308']
-  #   metrics_path: '/metrics'
-  #   scrape_interval: 30s
+  # TimescaleDB Postgres Exporter
+  - job_name: 'timescaledb'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # Kafka Exporter - Broker and consumer group metrics
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka-exporter:9308']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # MinIO - Built-in Prometheus metrics
+  - job_name: 'minio'
+    static_configs:
+      - targets: ['minio:9000']
+    metrics_path: '/minio/v2/metrics/cluster'
+    scrape_interval: 30s
+
+  # Note: OpenSearch metrics are obtained via elasticsearch-consumer service
+  # For direct OpenSearch metrics, install the prometheus-exporter plugin

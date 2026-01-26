@@ -1,6 +1,6 @@
 # OVR-ALPR Project Status
 
-**Last Updated:** 2026-01-21
+**Last Updated:** 2026-01-24
 
 This document provides a snapshot of the current implementation status, showing what's working, what's in progress, and what's planned next.
 
@@ -173,6 +173,23 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
   - Health checks
   - Real-time statistics
   - Connection pooling
+  - Service Manager Dashboard (start/stop/restart services)
+
+#### 12b. Service Manager Dashboard ✅
+- **File:** `core-services/api/service_manager.py`
+- **Container:** `alpr-query-api` (integrated)
+- **Status:** Production-ready
+- **Features:**
+  - Web dashboard at `/services/dashboard`
+  - Start/stop/restart individual services or groups
+  - Real-time container status and health monitoring
+  - Memory usage tracking per service and group
+  - Service groups: kafka, storage, search, alerts, monitoring, analytics, optional
+  - RAM budget estimation and tracking
+  - Docker CLI integration for reliable container control
+- **Service Groups:**
+  - 20 services tracked across 7 groups
+  - Excludes query-api (self-hosted)
 
 #### 13. MinIO Object Storage ✅
 - **File:** `services/storage/image_storage_service.py`
@@ -242,7 +259,7 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
   - PromQL query engine
   - Alert rule evaluation
   - Available at localhost:9090
-  - Scrapes: pilot.py, kafka-consumer, query-api, cAdvisor
+  - Scrapes: pilot.py, kafka-consumer, query-api, cAdvisor, node-exporter, postgres-exporter, kafka-exporter
 
 #### 18. Grafana ✅
 - **Container:** `alpr-grafana`
@@ -256,8 +273,10 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
   - Dashboards:
     - ALPR Overview (FPS, detections, latency)
     - System Performance (CPU, RAM, network)
-    - Kafka & Database (pipeline metrics)
+    - Service Status (all services health, container metrics)
+    - Kafka & Database (broker metrics, consumer lag, PostgreSQL stats)
     - Logs Explorer (centralized logging)
+    - OpenSearch/Elasticsearch (search indexing metrics)
 
 #### 19. Metabase ✅
 - **Container:** `alpr-metabase`
@@ -302,6 +321,19 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
   - Real-time monitoring
   - Prometheus metrics export
   - Available at localhost:8082
+
+#### 22b. Prometheus Exporters ✅
+- **Status:** Production-ready
+- **Containers:**
+  - `alpr-node-exporter` - Host system metrics (CPU, memory, disk, network)
+  - `alpr-postgres-exporter` - TimescaleDB/PostgreSQL metrics (connections, queries, size)
+  - `alpr-kafka-exporter` - Kafka broker metrics (consumer lag, topics, partitions)
+- **Features:**
+  - Node Exporter at localhost:9100
+  - Postgres Exporter at localhost:9187
+  - Kafka Exporter at localhost:9308
+  - All metrics scraped by Prometheus
+  - Grafana dashboards updated to use exporter metrics
 
 #### 23. Alert Engine ✅
 - **Container:** `alpr-alert-engine`

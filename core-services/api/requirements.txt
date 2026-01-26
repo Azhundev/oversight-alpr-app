@@ -19,3 +19,6 @@ loguru>=0.7.2           # Logging library
 
 # Monitoring
 prometheus-fastapi-instrumentator>=6.1.0  # Prometheus metrics for FastAPI
+
+# Service Manager (for incremental startup dashboard)
+docker>=7.0.0           # Docker SDK for Python

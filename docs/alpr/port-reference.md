@@ -33,6 +33,9 @@ Complete reference of all ports used by the ALPR pipeline components.
 | Loki | 3100 | 3100 | HTTP | Log aggregation | http://localhost:3100 |
 | Promtail | 9080 | - | HTTP | Log shipping (internal) | - |
 | cAdvisor | 8080 | 8082 | HTTP | Container metrics | http://localhost:8082 |
+| Node Exporter | 9100 | 9100 | HTTP | Host system metrics | http://localhost:9100 |
+| Postgres Exporter | 9187 | 9187 | HTTP | TimescaleDB metrics | http://localhost:9187 |
+| Kafka Exporter | 9308 | 9308 | HTTP | Kafka broker metrics | http://localhost:9308 |
 | **BI & Analytics** |
 | Metabase | 3000 | 3001 | HTTP | Advanced BI and reporting | http://localhost:3001 |
 
@@ -65,13 +68,16 @@ ALPR application services:
 - **Kafka Consumer (8002)**: Storage service internal metrics endpoint
 - **ALPR Pilot (8001)**: Edge processing metrics
 
-### Monitoring Stack (Ports 3000, 3001, 3100, 8082, 9090)
+### Monitoring Stack (Ports 3000, 3001, 3100, 8082, 9090, 9100, 9187, 9308)
 Observability and analytics infrastructure:
 - **Grafana (3000)**: Main monitoring dashboard
 - **Metabase (3001)**: Advanced BI and analytics
 - **Prometheus (9090)**: Metrics database and query engine
 - **Loki (3100)**: Log aggregation backend
 - **cAdvisor (8082)**: Container resource metrics
+- **Node Exporter (9100)**: Host system metrics (CPU, memory, disk)
+- **Postgres Exporter (9187)**: TimescaleDB/PostgreSQL metrics
+- **Kafka Exporter (9308)**: Kafka broker and consumer group metrics
 
 ## Port Conflicts and Resolutions
 
@@ -107,6 +113,7 @@ Query API:          http://localhost:8000
   API Docs:         http://localhost:8000/docs
   SQL Queries:      http://localhost:8000/events/*
   Search Queries:   http://localhost:8000/search/*
+  Service Manager:  http://localhost:8000/services/dashboard
 ```
 
 #### Monitoring & Observability
@@ -116,7 +123,8 @@ Grafana:            http://localhost:3000
   Password: alpr_admin_2024
 
 Metabase:           http://localhost:3001
-  (Setup required on first access - create admin account)
+  Email: admin@alpr.local
+  Password: alpr_secure_pass26
 
 Prometheus:         http://localhost:9090
   Targets:          http://localhost:9090/targets

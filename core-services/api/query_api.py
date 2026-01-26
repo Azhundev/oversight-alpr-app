@@ -16,6 +16,13 @@ import uvicorn
 from services.storage.storage_service import StorageService
 from services.storage.image_storage_service import ImageStorageService
 
+# Service Manager for incremental startup control
+try:
+    from service_manager import router as service_manager_router
+    SERVICE_MANAGER_AVAILABLE = True
+except ImportError:
+    SERVICE_MANAGER_AVAILABLE = False
+
 # OpenSearch for full-text search
 try:
     from opensearchpy import OpenSearch
@@ -50,6 +57,11 @@ app.add_middleware(
 # - http_request_duration_seconds (histogram)
 # - http_requests_in_progress (gauge)
 Instrumentator().instrument(app).expose(app)
+
+# Include Service Manager router for incremental startup control
+if SERVICE_MANAGER_AVAILABLE:
+    app.include_router(service_manager_router)
+    logger.info("✅ Service Manager endpoints enabled at /services/*")
 
 # Global storage service instances
 storage: Optional[StorageService] = None
@@ -240,21 +252,34 @@ def convert_s3_to_presigned(event: dict) -> dict:
 @app.get("/")
 async def root():
     """API root endpoint"""
+    endpoints = {
+        "stats": "/stats",
+        "recent": "/events/recent",
+        "by_id": "/events/{event_id}",
+        "by_plate": "/events/plate/{plate_text}",
+        "by_camera": "/events/camera/{camera_id}",
+        "search_fulltext": "/search/fulltext",
+        "search_facets": "/search/facets",
+        "search_analytics": "/search/analytics",
+        "search_query": "/search/query",
+    }
+
+    # Add service manager endpoints if available
+    if SERVICE_MANAGER_AVAILABLE:
+        endpoints.update({
+            "service_dashboard": "/services/dashboard",
+            "service_status": "/services/status",
+            "service_groups": "/services/groups",
+            "service_start": "/services/start/{group}",
+            "service_stop": "/services/stop/{group}",
+        })
+
     return {
         "name": "ALPR Query API",
-        "version": "1.0.0",
-        "endpoints": {
-            "stats": "/stats",
-            "recent": "/events/recent",
-            "by_id": "/events/{event_id}",
-            "by_plate": "/events/plate/{plate_text}",
-            "by_camera": "/events/camera/{camera_id}",
-            "search_fulltext": "/search/fulltext",
-            "search_facets": "/search/facets",
-            "search_analytics": "/search/analytics",
-            "search_query": "/search/query",
-        },
-        "opensearch_available": opensearch_client is not None
+        "version": "1.1.0",
+        "endpoints": endpoints,
+        "opensearch_available": opensearch_client is not None,
+        "service_manager_available": SERVICE_MANAGER_AVAILABLE
     }
 
 
