@@ -636,7 +636,10 @@ services:
 
   # MLflow - Model Registry and Experiment Tracking
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.9.2
+    build:
+      context: .
+      dockerfile: core-services/mlflow/Dockerfile
+    image: alpr-mlflow:v2.9.2
     container_name: alpr-mlflow
     depends_on:
       timescaledb:

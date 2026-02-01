@@ -76,6 +76,12 @@ class MLflowModelLoader:
         self.preferred_stage = preferred_stage
         self.cache_dir = cache_dir or os.path.join(tempfile.gettempdir(), "alpr-mlflow-cache")
 
+        # Configure S3/MinIO credentials for artifact access
+        if self.enable_mlflow:
+            os.environ.setdefault("AWS_ACCESS_KEY_ID", "alpr_minio")
+            os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "alpr_minio_secure_pass_2024")
+            os.environ.setdefault("MLFLOW_S3_ENDPOINT_URL", "http://localhost:9000")
+
         # Initialize MLflow client if available
         self.client: Optional[MlflowClient] = None
         self._mlflow_connected = False
