@@ -28,6 +28,8 @@
 - 8080: Kafka UI
 - 8081: Schema Registry
 - 3000: Grafana
+- 3001: Metabase
+- 5000: MLflow Model Registry
 - 9090: Prometheus
 - 9000/9001: MinIO (API/Console)
 - 9200/9600: OpenSearch
@@ -48,8 +50,13 @@ docker logs -f alpr-alert-engine
 # Access services
 http://localhost:8000/docs     # API docs
 http://localhost:3000           # Grafana dashboards
+http://localhost:5000           # MLflow Model Registry
 http://localhost:8080           # Kafka UI
 http://localhost:9001           # MinIO Console
+
+# MLflow Model Registry
+python scripts/register_existing_models.py  # Register current models
+python scripts/train_with_mlflow.py --data plates.yaml --epochs 100  # Train with tracking
 ```
 
 ### Service Dependencies
@@ -57,9 +64,11 @@ http://localhost:9001           # MinIO Console
 - Alert Engine depends on: Kafka, Schema Registry
 - Elasticsearch Consumer depends on: Kafka, Schema Registry, OpenSearch
 - Query API depends on: TimescaleDB, MinIO, OpenSearch
-- Pilot (edge) publishes to: Kafka (localhost:9092)
+- MLflow depends on: TimescaleDB (backend), MinIO (artifacts)
+- Pilot (edge) publishes to: Kafka (localhost:9092), loads models from MLflow
 
 ### Recent Major Changes
+- ✅ Added MLflow Model Registry for model versioning (2026-02-01)
 - ✅ Integrated OpenSearch for full-text search and analytics (2025-12-29)
 - ✅ Added Elasticsearch Consumer for real-time indexing (2025-12-29)
 - ✅ Extended Query API with 4 new search endpoints (2025-12-29)
@@ -77,10 +86,12 @@ http://localhost:9001           # MinIO Console
 5. **Search plates**: Use search endpoints at http://localhost:8000/docs#/default/search_fulltext_search_fulltext_get
 6. **Debug Kafka**: Use Kafka UI at http://localhost:8080
 7. **Check OpenSearch**: http://localhost:9200/_cluster/health
+8. **Register models**: Run `python scripts/register_existing_models.py`
+9. **Train with tracking**: Run `python scripts/train_with_mlflow.py --data plates.yaml`
 
 ### Current System Status
-- Phase 4 Priority 5 COMPLETE: OpenSearch integration with full-text search
-- 15 core services + 7 infrastructure + 5 monitoring services
-- Full-text search, faceted queries, analytics aggregations operational
-- Search endpoints: /search/fulltext, /search/facets, /search/analytics, /search/query
-- Next: Phase 4 remaining priorities (Multi-topic Kafka, Advanced BI)
+- Phase 6 Priority 10 COMPLETE: MLflow Model Registry operational
+- Phase 4 COMPLETE: OpenSearch, Multi-topic Kafka, Metabase BI
+- 16 core services + 7 infrastructure + 6 monitoring services + 1 MLOps
+- MLflow at http://localhost:5000 for model versioning and experiment tracking
+- Next: Phase 5 Scale & Optimization (DeepStream, Triton - optional)

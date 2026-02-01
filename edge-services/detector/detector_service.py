@@ -1,6 +1,10 @@
 """
 YOLOv11 Detector Service
 Optimized for NVIDIA Jetson Orin NX with TensorRT
+
+Supports loading models from:
+- MLflow Model Registry (if enabled and available)
+- Local filesystem (fallback)
 """
 
 import cv2
@@ -9,13 +13,21 @@ import torch
 import tensorrt as trt
 from ultralytics import YOLO
 from loguru import logger
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from pathlib import Path
 import time
 import json
 import gc
+import os
 
 from shared.schemas.event import BoundingBox, VehicleDetection
+
+# Optional MLflow support
+try:
+    from edge_services.detector.mlflow_model_loader import MLflowModelLoader
+    MLFLOW_LOADER_AVAILABLE = True
+except ImportError:
+    MLFLOW_LOADER_AVAILABLE = False
 
 
 class YOLOv11Detector:
@@ -33,6 +45,8 @@ class YOLOv11Detector:
         fp16: bool = True,
         int8: bool = False,
         batch_size: int = 1,
+        use_mlflow: bool = True,
+        mlflow_tracking_uri: Optional[str] = None,
     ):
         """
         Initialize YOLO detector
@@ -45,6 +59,8 @@ class YOLOv11Detector:
             fp16: Use FP16 precision for faster inference
             int8: Use INT8 precision for even faster inference (requires calibration)
             batch_size: Batch size for inference
+            use_mlflow: Enable loading models from MLflow Model Registry
+            mlflow_tracking_uri: MLflow server URI (default: http://localhost:5000)
         """
         # Clear memory before initialization to prevent OOM errors
         gc.collect()
@@ -60,6 +76,10 @@ class YOLOv11Detector:
         self.fp16 = fp16
         self.int8 = int8
         self.batch_size = batch_size
+        self.use_mlflow = use_mlflow
+        self.mlflow_tracking_uri = mlflow_tracking_uri or os.environ.get(
+            "MLFLOW_TRACKING_URI", "http://localhost:5000"
+        )
 
         # Vehicle classes from COCO dataset
         self.vehicle_classes = {
@@ -69,19 +89,69 @@ class YOLOv11Detector:
             7: 'truck'
         }
 
+        # Initialize MLflow model loader if enabled
+        self.mlflow_loader: Optional[MLflowModelLoader] = None
+        self.model_metadata: Dict[str, Any] = {}
+
+        if self.use_mlflow and MLFLOW_LOADER_AVAILABLE:
+            try:
+                self.mlflow_loader = MLflowModelLoader(
+                    tracking_uri=self.mlflow_tracking_uri,
+                    fallback_models_dir="models",
+                    enable_mlflow=True,
+                    preferred_stage="Production"
+                )
+                logger.info(f"MLflow model loader initialized (URI: {self.mlflow_tracking_uri})")
+            except Exception as e:
+                logger.warning(f"Failed to initialize MLflow loader: {e}")
+                self.mlflow_loader = None
+
         # Load vehicle detection model
-        logger.info(f"Loading vehicle detection model: {vehicle_model_path}")
-        self.vehicle_model = self._load_model(vehicle_model_path)
+        vehicle_path = vehicle_model_path
+        if self.mlflow_loader:
+            try:
+                vehicle_path, meta = self.mlflow_loader.get_model_path(
+                    "alpr-vehicle-detector",
+                    vehicle_model_path
+                )
+                self.model_metadata["vehicle_detector"] = meta
+                logger.info(f"Vehicle model loaded from {meta.get('source', 'unknown')}")
+            except Exception as e:
+                logger.warning(f"MLflow vehicle model load failed, using local: {e}")
+
+        logger.info(f"Loading vehicle detection model: {vehicle_path}")
+        self.vehicle_model = self._load_model(vehicle_path)
 
         # Load optional plate detection model
         self.plate_model = None
-        if plate_model_path and Path(plate_model_path).exists():
-            logger.info(f"Loading plate detection model: {plate_model_path}")
-            self.plate_model = self._load_model(plate_model_path)
+        plate_path = plate_model_path
+
+        if plate_model_path:
+            if self.mlflow_loader:
+                try:
+                    plate_path, meta = self.mlflow_loader.get_model_path(
+                        "alpr-plate-detector",
+                        plate_model_path
+                    )
+                    self.model_metadata["plate_detector"] = meta
+                    logger.info(f"Plate model loaded from {meta.get('source', 'unknown')}")
+                except Exception as e:
+                    logger.warning(f"MLflow plate model load failed, using local: {e}")
+                    plate_path = plate_model_path
+
+            if plate_path and Path(plate_path).exists():
+                logger.info(f"Loading plate detection model: {plate_path}")
+                self.plate_model = self._load_model(plate_path)
+            else:
+                logger.warning("No custom plate model provided, will use vehicle model for plate detection")
         else:
             logger.warning("No custom plate model provided, will use vehicle model for plate detection")
 
         logger.success("YOLOv11 detector initialized successfully")
+
+        # Log model metadata if available
+        if self.model_metadata:
+            logger.info(f"Model metadata: {json.dumps(self.model_metadata, indent=2, default=str)}")
 
     def _load_model(self, model_path: str) -> YOLO:
         """

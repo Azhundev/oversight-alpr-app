@@ -425,6 +425,23 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
   - Real-time metrics aggregation
   - Graceful shutdown handling
 
+#### 29. MLflow Model Registry ✅
+- **Container:** `alpr-mlflow`
+- **Status:** Production-ready
+- **Features:**
+  - MLflow 2.9.2 server at localhost:5000
+  - Model versioning with stages (None, Staging, Production, Archived)
+  - Experiment tracking with metrics and parameters
+  - Artifact storage in MinIO (alpr-mlflow-artifacts bucket)
+  - Backend store in TimescaleDB (mlflow_db)
+  - Integration with detector service via MLflowModelLoader
+  - Training script with automatic logging (train_with_mlflow.py)
+  - Model registration script (register_existing_models.py)
+  - Grafana dashboard for monitoring
+- **Registered Models:**
+  - `alpr-vehicle-detector`: YOLOv11 vehicle detection
+  - `alpr-plate-detector`: Custom license plate detection
+
 ---
 
 ## 🔄 Partially Implemented
@@ -451,14 +468,22 @@ None - All Phase 4 features (Priorities 1-7) are fully implemented. Phase 4 is C
 
 ### MLOps (Phase 6)
 
-3. **Model Registry (MLflow)** ❌
-   - Version control
-   - Experiment tracking
-   - **Effort:** 2 weeks
+3. **Model Registry (MLflow)** ✅
+   - ✅ MLflow 2.9.2 deployed (localhost:5000)
+   - ✅ Model versioning with stages
+   - ✅ Experiment tracking
+   - ✅ Artifact storage in MinIO
+   - ✅ Integration with detector service
 
-6. **Training Pipeline (TAO Toolkit)** ❌
-    - Automated retraining
-    - **Effort:** 4-6 weeks
+4. **Training Pipeline** ✅
+    - ✅ train_with_mlflow.py script
+    - ✅ Ultralytics YOLO integration
+    - ✅ Automatic metrics and artifact logging
+    - ✅ Model registration after training
+
+5. **Distributed Tracing (Tempo)** ❌
+    - OpenTelemetry instrumentation
+    - **Effort:** 2-3 weeks
 
 ---
 

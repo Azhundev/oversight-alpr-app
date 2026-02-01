@@ -113,5 +113,14 @@ scrape_configs:
     metrics_path: '/minio/v2/metrics/cluster'
     scrape_interval: 30s
 
+  # MLflow - Model Registry and Experiment Tracking
+  # Note: MLflow doesn't expose Prometheus metrics by default
+  # This checks the /health endpoint for service availability
+  - job_name: 'mlflow'
+    static_configs:
+      - targets: ['mlflow:5000']
+    metrics_path: '/health'
+    scrape_interval: 30s
+
   # Note: OpenSearch metrics are obtained via elasticsearch-consumer service
   # For direct OpenSearch metrics, install the prometheus-exporter plugin

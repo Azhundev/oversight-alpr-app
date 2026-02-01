@@ -111,7 +111,8 @@ services:
       POSTGRES_DB: alpr_db
     volumes:
       - timescaledb-data:/var/lib/postgresql/data
-      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01_init_db.sql
+      - ./scripts/init_mlflow_db.sql:/docker-entrypoint-initdb.d/02_init_mlflow_db.sql
     networks:
       - alpr-network
     restart: unless-stopped
@@ -236,6 +237,8 @@ services:
       mc alias set minio http://minio:9000 alpr_minio alpr_minio_secure_pass_2024;
       mc mb --ignore-existing minio/alpr-plate-images;
       mc policy set download minio/alpr-plate-images;
+      mc mb --ignore-existing minio/alpr-mlflow-artifacts;
+      mc policy set download minio/alpr-mlflow-artifacts;
       exit 0;
       "
     networks:
@@ -626,6 +629,46 @@ services:
     networks:
       - alpr-network
     restart: unless-stopped
+
+  # ============================================================================
+  # MLOPS - Model Registry
+  # ============================================================================
+
+  # MLflow - Model Registry and Experiment Tracking
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.2
+    container_name: alpr-mlflow
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    environment:
+      # Backend store for experiment/run metadata
+      MLFLOW_BACKEND_STORE_URI: postgresql://mlflow:mlflow_secure_pass@timescaledb:5432/mlflow_db
+      # Artifact storage in MinIO
+      MLFLOW_ARTIFACTS_DESTINATION: s3://alpr-mlflow-artifacts
+      AWS_ACCESS_KEY_ID: alpr_minio
+      AWS_SECRET_ACCESS_KEY: alpr_minio_secure_pass_2024
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://mlflow:mlflow_secure_pass@timescaledb:5432/mlflow_db
+      --default-artifact-root s3://alpr-mlflow-artifacts
+      --host 0.0.0.0
+      --port 5000
+      --serve-artifacts
+    networks:
+      - alpr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   # Data persistence volumes

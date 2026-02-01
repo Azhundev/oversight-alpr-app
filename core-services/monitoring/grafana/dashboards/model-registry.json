@@ -1,0 +1,330 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "tags": [],
+      "targetBlank": true,
+      "title": "MLflow UI",
+      "type": "link",
+      "url": "http://localhost:5000"
+    }
+  ],
+  "liveNow": true,
+  "panels": [
+    {
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "options": {
+        "content": "# ALPR Model Registry Dashboard\nMonitoring MLflow Model Registry and model performance metrics. [Open MLflow UI](http://localhost:5000)",
+        "mode": "markdown"
+      },
+      "type": "text"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 2 },
+      "id": 200,
+      "panels": [],
+      "title": "MLflow Server Status",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 3 },
+      "id": 1,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "up{job=\"mlflow\"}", "legendFormat": "MLflow Server", "refId": "A" }],
+      "title": "MLflow Server",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 3 },
+      "id": 2,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "up{job=\"minio\"}", "legendFormat": "MinIO (Artifacts)", "refId": "A" }],
+      "title": "MinIO Storage",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 3 },
+      "id": 3,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "up{job=\"timescaledb\"}", "legendFormat": "TimescaleDB (Backend)", "refId": "A" }],
+      "title": "TimescaleDB",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 3 },
+      "id": 4,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "up{job=\"alpr-pilot\"}", "legendFormat": "Edge Pilot", "refId": "A" }],
+      "title": "Edge Pilot",
+      "type": "stat"
+    },
+    {
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 3 },
+      "id": 5,
+      "options": {
+        "content": "### Quick Links\n- [MLflow UI](http://localhost:5000) - Model Registry\n- [MinIO Console](http://localhost:9001) - Artifact Storage\n- [API Docs](http://localhost:8000/docs) - Query API",
+        "mode": "markdown"
+      },
+      "title": "Resources",
+      "type": "text"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "id": 300,
+      "panels": [],
+      "title": "Model Inference Performance",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisCenteredZero": false, "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "pointSize": 5, "spanNulls": false },
+          "unit": "fps"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 8 },
+      "id": 10,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "alpr_fps", "legendFormat": "Pipeline FPS", "refId": "A" }
+      ],
+      "title": "Detection Pipeline FPS",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisCenteredZero": false, "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "pointSize": 5, "spanNulls": false },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 8 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "alpr_inference_latency_seconds * 1000", "legendFormat": "Inference Latency", "refId": "A" },
+        { "expr": "alpr_processing_latency_seconds * 1000", "legendFormat": "Total Latency", "refId": "B" }
+      ],
+      "title": "Model Inference Latency (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisCenteredZero": false, "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "pointSize": 5, "spanNulls": false },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 8 },
+      "id": 12,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "rate(alpr_detections_total[5m])", "legendFormat": "Detections/sec", "refId": "A" },
+        { "expr": "rate(alpr_plates_detected_total[5m])", "legendFormat": "Plates/sec", "refId": "B" }
+      ],
+      "title": "Detection Rate",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 400,
+      "panels": [],
+      "title": "Model Quality Metrics",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 0.7 }, { "color": "green", "value": 0.85 }] },
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 16 },
+      "id": 20,
+      "options": { "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "targets": [
+        { "expr": "avg(alpr_plate_confidence)", "legendFormat": "Avg Confidence", "refId": "A" }
+      ],
+      "title": "Avg Plate Confidence",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisCenteredZero": false, "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "pointSize": 5, "spanNulls": false },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": { "h": 5, "w": 10, "x": 6, "y": 16 },
+      "id": 21,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, rate(alpr_plate_confidence_bucket[5m]))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, rate(alpr_plate_confidence_bucket[5m]))", "legendFormat": "p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, rate(alpr_plate_confidence_bucket[5m]))", "legendFormat": "p99", "refId": "C" }
+      ],
+      "title": "Confidence Distribution",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 16 },
+      "id": 22,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "values": ["value"] }, "pieType": "pie", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "expr": "sum by (vehicle_type) (alpr_vehicles_by_type)", "legendFormat": "{{vehicle_type}}", "refId": "A" }
+      ],
+      "title": "Detections by Vehicle Type",
+      "type": "piechart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
+      "id": 500,
+      "panels": [],
+      "title": "Resource Usage",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisCenteredZero": false, "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "pointSize": 5, "spanNulls": false },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 22 },
+      "id": 30,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "sortBy": "Last", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "container_memory_usage_bytes{name=\"alpr-mlflow\"}", "legendFormat": "MLflow", "refId": "A" },
+        { "expr": "container_memory_usage_bytes{name=\"alpr-timescaledb\"}", "legendFormat": "TimescaleDB", "refId": "B" },
+        { "expr": "container_memory_usage_bytes{name=\"alpr-minio\"}", "legendFormat": "MinIO", "refId": "C" }
+      ],
+      "title": "MLOps Stack Memory Usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "axisCenteredZero": false, "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "pointSize": 5, "spanNulls": false },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 22 },
+      "id": 31,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "sortBy": "Last", "sortDesc": true }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "rate(container_cpu_usage_seconds_total{name=\"alpr-mlflow\"}[5m]) * 100", "legendFormat": "MLflow", "refId": "A" },
+        { "expr": "rate(container_cpu_usage_seconds_total{name=\"alpr-timescaledb\"}[5m]) * 100", "legendFormat": "TimescaleDB", "refId": "B" },
+        { "expr": "rate(container_cpu_usage_seconds_total{name=\"alpr-minio\"}[5m]) * 100", "legendFormat": "MinIO", "refId": "C" }
+      ],
+      "title": "MLOps Stack CPU Usage (%)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 },
+      "id": 600,
+      "panels": [],
+      "title": "Model Registry Info",
+      "type": "row"
+    },
+    {
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 29 },
+      "id": 40,
+      "options": {
+        "content": "## Registered Models\n\nView and manage models in the [MLflow Model Registry](http://localhost:5000/#/models).\n\n### Model Stages\n\n| Stage | Description | Use Case |\n|-------|-------------|----------|\n| **None** | Just registered | Initial upload |\n| **Staging** | Testing/validation | Pre-production testing |\n| **Production** | Active deployment | Live inference |\n| **Archived** | Previous versions | Rollback/history |\n\n### Current ALPR Models\n\n| Model Name | Description | Files |\n|------------|-------------|-------|\n| `alpr-vehicle-detector` | YOLOv11 vehicle detection (COCO) | .pt, .engine, .onnx |\n| `alpr-plate-detector` | Custom license plate detector | .pt, .engine, .onnx |\n\n### Quick Commands\n\n```bash\n# Register existing models\npython scripts/register_existing_models.py\n\n# Train with MLflow tracking\npython scripts/train_with_mlflow.py --data plates.yaml --epochs 100\n\n# List registered models\ncurl http://localhost:5000/api/2.0/mlflow/registered-models/list | jq\n```",
+        "mode": "markdown"
+      },
+      "title": "Model Registry Overview",
+      "type": "text"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["alpr", "mlflow", "mlops"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "ALPR Model Registry",
+  "uid": "alpr-model-registry",
+  "version": 1,
+  "weekStart": ""
+}

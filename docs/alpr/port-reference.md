@@ -38,6 +38,8 @@ Complete reference of all ports used by the ALPR pipeline components.
 | Kafka Exporter | 9308 | 9308 | HTTP | Kafka broker metrics | http://localhost:9308 |
 | **BI & Analytics** |
 | Metabase | 3000 | 3001 | HTTP | Advanced BI and reporting | http://localhost:3001 |
+| **MLOps** |
+| MLflow | 5000 | 5000 | HTTP | Model Registry & Tracking | http://localhost:5000 |
 
 ## Port Groups
 
@@ -78,6 +80,10 @@ Observability and analytics infrastructure:
 - **Node Exporter (9100)**: Host system metrics (CPU, memory, disk)
 - **Postgres Exporter (9187)**: TimescaleDB/PostgreSQL metrics
 - **Kafka Exporter (9308)**: Kafka broker and consumer group metrics
+
+### MLOps (Port 5000)
+Machine learning operations infrastructure:
+- **MLflow (5000)**: Model Registry, experiment tracking, and artifact storage
 
 ## Port Conflicts and Resolutions
 
@@ -405,6 +411,9 @@ Monitoring:
   Metabase:        http://localhost:3001
   Prometheus:      http://localhost:9090
   cAdvisor:        http://localhost:8082
+
+MLOps:
+  MLflow:          http://localhost:5000
 
 Metrics:
   Pilot:           http://localhost:8001/metrics
