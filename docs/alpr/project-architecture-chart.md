@@ -1,6 +1,6 @@
 # OVR-ALPR System Architecture - Mermaid Chart
 
-**Last Updated:** 2026-01-24
+**Last Updated:** 2026-02-01
 
 This document contains the Mermaid chart visualization of the complete OVR-ALPR system architecture based on the current implementation status.
 
@@ -69,6 +69,10 @@ flowchart TB
         subgraph "Service Management"
             SVCMGR["🎛️ Service Manager<br/>✅ PRODUCTION<br/>Start/Stop/Monitor<br/>localhost:8000/services"]
         end
+
+        subgraph "MLOps Layer"
+            MLFLOW["🧪 MLflow<br/>✅ PRODUCTION<br/>Model Registry<br/>localhost:5000"]
+        end
     end
 
     subgraph "Schema Definitions"
@@ -130,6 +134,11 @@ flowchart TB
     UI -.->|"Monitor"| KAFKA
     UI -.->|"View schemas"| SR
 
+    %% MLflow Flow
+    MLFLOW <-->|"Backend store"| TSDB
+    MLFLOW <-->|"Artifact storage"| MINIO
+    DET -.->|"Load models"| MLFLOW
+
     %% Monitoring Flow
     PROM -.->|"Scrape"| PUB
     PROM -.->|"Scrape"| CONS
@@ -151,7 +160,7 @@ flowchart TB
     classDef schema fill:#E6E6FA,stroke:#9370DB,stroke-width:2px,color:#000
     classDef client fill:#87CEEB,stroke:#4682B4,stroke-width:2px,color:#000
 
-    class CAM,DET,TRK,OCR,EVT,PUB,IMG,ZK,KAFKA,SR,UI,CONS,STORE,TSDB,MINIO,ESCONS,OPENSEARCH,ALERT,API,PROM,GRAF,METABASE,LOKI,PTAIL,CADV production
+    class CAM,DET,TRK,OCR,EVT,PUB,IMG,ZK,KAFKA,SR,UI,CONS,STORE,TSDB,MINIO,ESCONS,OPENSEARCH,ALERT,API,PROM,GRAF,METABASE,LOKI,PTAIL,CADV,MLFLOW production
     class CFG1,CFG2,CFG3 config
     class SCHEMA schema
     class CLIENT,ADMIN client
@@ -163,9 +172,9 @@ flowchart TB
 
 ```mermaid
 pie title "Implementation Status (By Component Count)"
-    "Fully Implemented (Production)" : 28
+    "Fully Implemented (Production)" : 29
     "Partially Implemented" : 0
-    "Not Implemented" : 2
+    "Not Implemented" : 1
 ```
 
 ---
@@ -183,7 +192,7 @@ graph LR
         E6["Kafka Publisher ✅"]
     end
 
-    subgraph "Backend Services (10)"
+    subgraph "Backend Services (11)"
         B1["Kafka Broker ✅"]
         B2["Schema Registry ✅"]
         B3["Kafka Consumer ✅"]
@@ -194,6 +203,7 @@ graph LR
         B8["Alert Engine ✅"]
         B9["Elasticsearch Consumer ✅"]
         B10["OpenSearch ✅"]
+        B11["MLflow ✅"]
     end
 
     subgraph "Monitoring & Analytics Services (6)"
@@ -210,6 +220,10 @@ graph LR
 
     subgraph "Management (1)"
         SM1["Service Manager ✅"]
+    end
+
+    subgraph "MLOps (1)"
+        ML1["MLflow ✅"]
     end
 
     subgraph "Infrastructure (3)"
@@ -403,6 +417,10 @@ mindmap
       Loki 2.x
       Promtail 2.x
       cAdvisor
+    MLOps
+      MLflow 2.9.2
+      Model Registry
+      Experiment Tracking
 ```
 
 ---
@@ -416,7 +434,8 @@ graph LR
         C2["15-25 FPS throughput"]
         C3["Multi-topic Kafka<br/>(4 topics)"]
         C4["Advanced BI dashboards"]
-        C5["30 services operational"]
+        C5["31 services operational"]
+        C6["MLflow Model Registry"]
     end
 
     subgraph "Phase 3 & 4 Complete ✅"
@@ -427,6 +446,7 @@ graph LR
         G5["Full-text search ✅"]
         G6["Dual storage (SQL+NoSQL) ✅"]
         G7["Dead Letter Queue ✅"]
+        G8["MLflow Model Registry ✅"]
     end
 
     subgraph "Phase 5 Vision 🚀"

@@ -1,6 +1,6 @@
 # ALPR System - Next Steps & Roadmap
 
-**Last Updated:** 2026-01-24
+**Last Updated:** 2026-02-01
 
 This document compares the original system vision with current implementation status and outlines the next modules/services needed to achieve the complete production architecture.
 
@@ -124,7 +124,7 @@ flowchart LR
 | **Edge Processing** | 100% | ✅ Production-ready with GPU optimization and object storage |
 | **Core Backend** | 95% | ✅ Multi-topic Kafka, DLQ, Schema Registry, dual storage (SQL + NoSQL), and search operational |
 | **Applications** | 100% | ✅ Grafana dashboards + Alert Engine complete |
-| **MLOps** | 40% | 🟡 Observability complete, ML workflow tools missing |
+| **MLOps** | 80% | ✅ Model Registry, versioning, and training pipeline complete. Only distributed tracing missing |
 
 **Overall:** 🟢 **95% Complete** - Enterprise-grade ALPR system with full monitoring, alerting, advanced search, BI analytics, and robust error handling operational
 
@@ -790,7 +790,7 @@ Backend Services
 
 **Phase 4 Complete!** ✨
 - ✅ All Phase 4 priorities complete (Schema Registry, Search, Multi-Topic Kafka, Advanced BI)
-- ✅ 30 services operational (15 core + 7 infrastructure + 6 monitoring/analytics + 2 DLQ services)
+- ✅ 31 services operational (15 core + 8 infrastructure + 6 monitoring/analytics + 2 DLQ services)
 - ✅ Full production stack with observability, search, alerts, BI, and error handling
 
 **Next Priority:** Phase 5 - Scale & Optimization (optional, for extreme scale)
@@ -825,10 +825,13 @@ Backend Services
 ✅ Metrics Consumer (port 8006) - aggregates system metrics
 ✅ Retry logic with exponential backoff (3 attempts)
 ✅ Timeout detection (30-second maximum)
+✅ MLflow Model Registry (localhost:5000)
+✅ Model versioning with stages (None, Staging, Production, Archived)
+✅ Training pipeline with experiment tracking (train_with_mlflow.py)
 
 ### What's Missing (Nice-to-Have for Future Phases)
-❌ Model registry (MLflow) - Phase 6
-❌ Training pipeline (TAO Toolkit) - Phase 6
+❌ Distributed tracing (Tempo) - Phase 6
+❌ Advanced training pipeline (TAO Toolkit) - Phase 6
 
 ### What's Optional (Future)
 ⏭️ DeepStream migration (6-8x throughput)

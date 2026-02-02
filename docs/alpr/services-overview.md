@@ -41,7 +41,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 ## System Summary
 
-**Total Services**: 18 core services + 7 infrastructure services + 9 monitoring/analytics services = **34 services total**
+**Total Services**: 18 core services + 8 infrastructure services + 9 monitoring/analytics services = **35 services total**
 
 **Edge Processing** (pilot.py):
 1. Camera Ingestion Service
@@ -73,6 +73,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 - TimescaleDB (time-series SQL database)
 - MinIO (S3-compatible object storage)
 - OpenSearch (full-text search and analytics engine)
+- MLflow (model registry and experiment tracking)
 
 **Monitoring & Analytics Stack** (Docker):
 - Prometheus (metrics collection and storage)
@@ -1295,6 +1296,28 @@ TWILIO_AUTH_TOKEN=your_twilio_auth_token
 - High-performance local storage
 - Docker volume persistence (`minio-data`)
 - Health checks and monitoring
+
+### MLOps
+
+**MLflow** (`ghcr.io/mlflow/mlflow:v2.9.2`)
+- Model registry for versioning and deployment
+- Port: 5000
+- Experiment tracking with metrics and parameters
+- Container: `alpr-mlflow`
+- Backend: TimescaleDB (mlflow_db)
+- Artifacts: MinIO (alpr-mlflow-artifacts bucket)
+
+**Key Features**:
+- Model versioning with stages (None, Staging, Production, Archived)
+- Experiment tracking for training runs
+- Artifact storage for model files (.pt, .engine, .onnx)
+- REST API for model deployment automation
+- Integration with detector service via MLflowModelLoader
+- Grafana dashboard for model monitoring
+
+**Registered Models**:
+- `alpr-vehicle-detector`: YOLOv11 vehicle detection model
+- `alpr-plate-detector`: Custom license plate detection model
 
 ### Monitoring & Observability
 

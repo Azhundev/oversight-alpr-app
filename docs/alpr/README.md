@@ -48,6 +48,7 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
 | **Node Exporter** | Docker Container | Host system metrics (Port 9100) |
 | **Postgres Exporter** | Docker Container | TimescaleDB metrics (Port 9187) |
 | **Kafka Exporter** | Docker Container | Kafka broker metrics (Port 9308) |
+| **MLflow** | Docker Container | Model Registry & Experiment Tracking (Port 5000) |
 
 ## Architecture
 
@@ -237,6 +238,7 @@ python3 pilot.py --no-display --frame-skip 2
 - **MinIO API**: http://localhost:9000
 - **OpenSearch**: http://localhost:9200
 - **TimescaleDB**: localhost:5432 (user: alpr, db: alpr_db)
+- **MLflow**: http://localhost:5000 (Model Registry & Experiments)
 
 ### 6. Test the System
 

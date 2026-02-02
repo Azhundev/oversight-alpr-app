@@ -48,6 +48,7 @@ python3 pilot.py --help
 - **Kafka UI:** http://localhost:8080 (message broker monitoring)
 - **MinIO Console:** http://localhost:9001 (object storage)
 - **Database:** `localhost:5432` (TimescaleDB)
+- **MLflow:** http://localhost:5000 (Model Registry & Experiments)
 
 ---
 
@@ -85,7 +86,7 @@ python3 pilot.py --help
                  │
                  ▼
 ┌─────────────────────────────────────────────────────┐
-│    BACKEND (Docker - 30 Services)                   │
+│    BACKEND (Docker - 35 Services)                   │
 │                                                      │
 │  Kafka → [Storage Consumer → TimescaleDB]           │
 │       ↓  [Elasticsearch Consumer → OpenSearch]      │
@@ -133,7 +134,8 @@ python3 pilot.py --help
 
 ### Edge Processing
 - **15-25 FPS** per stream (full pipeline with OCR)
-- **1-2 cameras** per Jetson Orin NX (16GB)
+- **4-6 RTSP cameras** per Jetson Orin NX (with GPU decode)
+- **1-2 video files** per Jetson (with CPU decode)
 - **40-90ms** end-to-end latency (capture → Kafka)
 - **Sub-20ms** detection (TensorRT FP16)
 
@@ -142,7 +144,7 @@ python3 pilot.py --help
 - **10,000+ messages/second** Kafka throughput
 - **500-1000 inserts/second** TimescaleDB
 
-**See:** [docs/ALPR_Pipeline/Project_Status.md](docs/ALPR_Pipeline/Project_Status.md) for detailed metrics.
+**See:** [docs/alpr/project-status.md](docs/alpr/project-status.md) for detailed metrics.
 
 ---
 
@@ -161,6 +163,7 @@ python3 pilot.py --help
 | **Monitoring** | Prometheus + Grafana + Loki | Metrics and logs |
 | **Analytics** | Metabase | Business intelligence & reports |
 | **Alerting** | Alert Engine | Multi-channel notifications |
+| **MLOps** | MLflow 2.9.2 | Model registry & experiment tracking |
 | **Service Manager** | FastAPI + Docker API | Service orchestration dashboard |
 | **Deployment** | Docker Compose | Container orchestration |
 
@@ -190,6 +193,7 @@ OVR-ALPR/
 │   ├── storage/               # Kafka → TimescaleDB consumer
 │   ├── api/                   # Query API (FastAPI)
 │   ├── alerting/              # Alert Engine (notifications)
+│   ├── mlflow/                # MLflow Model Registry
 │   └── monitoring/            # Prometheus, Grafana, Loki
 │
 ├── scripts/                    # Utility scripts
@@ -197,11 +201,11 @@ OVR-ALPR/
 │   └── *.py                   # Helper scripts
 │
 └── docs/                       # Documentation
-    └── ALPR_Pipeline/
-        ├── SERVICES_OVERVIEW.md      # Complete service reference
-        ├── Project_Status.md         # Current implementation status
-        ├── ALPR_Next_Steps.md        # Roadmap & next priorities
-        └── PIPELINE_COMPARISON.md    # Architecture comparisons
+    └── alpr/
+        ├── services-overview.md      # Complete service reference
+        ├── project-status.md         # Current implementation status
+        ├── next-steps.md             # Roadmap & next priorities
+        └── project-architecture-chart.md  # Architecture diagrams
 ```
 
 ---
@@ -209,17 +213,17 @@ OVR-ALPR/
 ## 📚 Documentation
 
 ### Getting Started
-- **[Deployment Guide](docs/ALPR_Pipeline/README.md)** - Complete deployment instructions
-- **[Quick Reference](docs/deployment/quick-reference.md)** - Common commands and operations
+- **[Deployment Guide](docs/alpr/README.md)** - Complete deployment instructions
+- **[Port Reference](docs/alpr/port-reference.md)** - All service ports and URLs
 
 ### Architecture & Design
-- **[Services Overview](docs/ALPR_Pipeline/SERVICES_OVERVIEW.md)** - All 10+ services documented
-- **[Pipeline Comparison](docs/ALPR_Pipeline/PIPELINE_COMPARISON.md)** - Current vs future architectures
+- **[Services Overview](docs/alpr/services-overview.md)** - All 35+ services documented
+- **[Architecture Chart](docs/alpr/project-architecture-chart.md)** - Mermaid architecture diagrams
 - **[Storage Layer](docs/storage-layer.md)** - TimescaleDB schema and queries
 
 ### Status & Roadmap
-- **[Project Status](docs/ALPR_Pipeline/Project_Status.md)** - What's implemented vs planned
-- **[Next Steps](docs/ALPR_Pipeline/ALPR_Next_Steps.md)** - Detailed roadmap with priorities
+- **[Project Status](docs/alpr/project-status.md)** - What's implemented vs planned
+- **[Next Steps](docs/alpr/next-steps.md)** - Detailed roadmap with priorities
 
 ### Technical Guides
 - **[Kafka Setup](docs/kafka-setup.md)** - Message broker configuration
@@ -293,14 +297,15 @@ KAFKA_TOPIC=alpr.plates.detected
 | SQL Database | ✅ Complete | TimescaleDB with hypertables |
 | Search Engine | ✅ Complete | OpenSearch with full-text search |
 | Query API | ✅ Complete | FastAPI with SQL + search endpoints |
-| Docker Deployment | ✅ Complete | 30 services containerized |
+| Docker Deployment | ✅ Complete | 35 services containerized |
 | Object Storage | ✅ Complete | MinIO with async uploads |
 | Monitoring Stack | ✅ Complete | Prometheus + Grafana + Loki |
 | Business Intelligence | ✅ Complete | Metabase analytics & reports |
 | Alert Engine | ✅ Complete | Multi-channel notifications + DLQ |
 | Error Handling | ✅ Complete | Dead Letter Queue + retry logic |
+| MLOps | ✅ Complete | MLflow model registry & training |
 
-**Overall:** 95% complete - Enterprise-grade ALPR system ready for production
+**Overall:** 98% complete - Enterprise-grade ALPR system ready for production
 
 **See:** [docs/alpr/project-status.md](docs/alpr/project-status.md)
 
@@ -328,11 +333,16 @@ KAFKA_TOPIC=alpr.plates.detected
 - Kubernetes deployment
 - Multi-region replication
 
-### Phase 6: Advanced MLOps (Optional)
-- Model registry (MLflow)
-- Automated training pipeline (TAO Toolkit)
+### ✅ Phase 6: MLOps (COMPLETE)
+- ✅ MLflow Model Registry (localhost:5000)
+- ✅ Model versioning with stages
+- ✅ Experiment tracking
+- ✅ Training pipeline (train_with_mlflow.py)
+
+### Phase 7: Advanced Optimization (Optional)
+- Automated retraining pipeline (TAO Toolkit)
 - A/B testing framework
-- Model versioning and rollback
+- Distributed tracing (Tempo)
 
 **See:** [docs/alpr/next-steps.md](docs/alpr/next-steps.md)
 
@@ -412,7 +422,7 @@ docker compose logs -f kafka-consumer
 # http://localhost:8080
 ```
 
-**See:** Full troubleshooting guide in [docs/ALPR_Pipeline/README.md#troubleshooting](docs/ALPR_Pipeline/README.md#troubleshooting)
+**See:** Full troubleshooting guide in [docs/alpr/README.md#troubleshooting](docs/alpr/README.md#troubleshooting)
 
 ---
 
@@ -476,6 +486,9 @@ curl http://localhost:8005/metrics  # DLQ Consumer
 curl http://localhost:8006/metrics  # Metrics Consumer
 curl http://localhost:8082/metrics  # cAdvisor
 
+# MLflow Model Registry
+http://localhost:5000
+
 # View recent events
 curl http://localhost:8000/events/recent?limit=5
 ```
@@ -504,7 +517,7 @@ Proprietary - Enterprise Use Only
 
 - **Project Lead:** Azhundev
 - **AI Assistant:** Claude Code (Anthropic)
-- **Documentation:** Last updated 2026-01-24
+- **Documentation:** Last updated 2026-02-02
 
 ---
 
@@ -514,7 +527,7 @@ Proprietary - Enterprise Use Only
 - **Documentation:** See `docs/` folder
 - **API Docs:** http://localhost:8000/docs
 - **Kafka UI:** http://localhost:8080
-- **Project Status:** [docs/ALPR_Pipeline/Project_Status.md](docs/ALPR_Pipeline/Project_Status.md)
+- **Project Status:** [docs/alpr/project-status.md](docs/alpr/project-status.md)
 
 ### Common Commands
 
@@ -537,4 +550,4 @@ tegrastats
 
 ---
 
-**Ready to deploy?** See [docs/ALPR_Pipeline/README.md](docs/ALPR_Pipeline/README.md) for complete deployment guide.
+**Ready to deploy?** See [docs/alpr/README.md](docs/alpr/README.md) for complete deployment guide.
