@@ -3,10 +3,10 @@
 
 FROM ghcr.io/mlflow/mlflow:v2.9.2
 
-# Install PostgreSQL driver and S3 support
-RUN pip install --no-cache-dir \
-    psycopg2-binary \
-    boto3
+# Install curl for health checks and Python dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir psycopg2-binary boto3
 
 # Default port
 EXPOSE 5000
