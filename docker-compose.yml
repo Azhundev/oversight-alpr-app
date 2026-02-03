@@ -400,11 +400,8 @@ services:
     networks:
       - alpr-network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    # Note: Loki uses distroless image without wget/curl, healthcheck removed
+    # Service health can be verified via: curl http://localhost:3100/ready
 
   # Promtail - Log shipper for Loki
   promtail:
