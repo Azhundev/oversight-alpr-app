@@ -1,6 +1,6 @@
 # ALPR System - Next Steps & Roadmap
 
-**Last Updated:** 2026-02-01
+**Last Updated:** 2026-02-02
 
 This document compares the original system vision with current implementation status and outlines the next modules/services needed to achieve the complete production architecture.
 
@@ -93,7 +93,7 @@ flowchart LR
 
 | Component | Original Plan | Current Implementation | Status |
 |-----------|---------------|------------------------|--------|
-| **BI Dashboards** | Grafana/Superset/Kibana | Grafana 10.x (5 dashboards) + Metabase (Business Intelligence) | ✅ Implemented |
+| **BI Dashboards** | Grafana/Superset/Kibana | Grafana 10.x (7 dashboards) + Metabase (Business Intelligence) | ✅ Implemented |
 | **Data Visualization** | Multi-source dashboards | Grafana (Prometheus + Loki + TimescaleDB) + Metabase (TimescaleDB SQL) | ✅ Implemented |
 | **Alert Engine** | Rules/CEP engine | Alert Engine with 4 notification channels | ✅ Implemented |
 | **Notifications** | Slack/Email/SMS/Webhooks | Email, Slack, Webhooks, SMS (Twilio) | ✅ Implemented |
@@ -111,7 +111,7 @@ flowchart LR
 | **Training Pipeline** | TAO Toolkit | train_with_mlflow.py + Ultralytics | ✅ Implemented |
 | **Metrics/Logs** | Prometheus + Loki | Prometheus 2.x + Loki 2.x + Promtail | ✅ Implemented |
 | **Tracing** | Tempo | None | ❌ Missing |
-| **Monitoring** | Grafana dashboards | Grafana 10.x with 6 dashboards | ✅ Implemented |
+| **Monitoring** | Grafana dashboards | Grafana 10.x with 7 dashboards | ✅ Implemented |
 
 **MLOps Status:** 🟢 **80% Complete** - Model Registry, versioning, and training pipeline operational. Only distributed tracing missing.
 
@@ -175,8 +175,8 @@ flowchart LR
 ### Important Gaps (Production Nice-to-Have)
 
 6. **✅ BI Dashboards & Analytics** - COMPLETE
-   - **Implemented:** Grafana (5 dashboards) + Metabase (Business Intelligence)
-   - **Grafana Dashboards:** ALPR Overview, System Performance, Kafka & Database, Search & Indexing, Logs Explorer
+   - **Implemented:** Grafana (7 dashboards) + Metabase (Business Intelligence)
+   - **Grafana Dashboards:** ALPR Overview, System Performance, Kafka & Database, Search & Indexing, Model Registry, Service Status, Logs Explorer
    - **Metabase Analytics:** Executive Overview, Camera Performance, Quality Reports, Time-based Analytics
    - **Access:** Grafana at localhost:3000, Metabase at localhost:3001
    - **Features:** Real-time metrics (Grafana), SQL analytics & reports (Metabase), scheduled email delivery
@@ -194,14 +194,19 @@ flowchart LR
    - **Current:** Edge-only processing
    - **Impact:** Each edge device processes independently
 
-9. **Model Registry (MLflow/NGC)**
-   - **Missing:** Version control and experiment tracking
-   - **Current:** Manual model management
-   - **Impact:** Difficult to track model performance
+9. **✅ Model Registry (MLflow)** - COMPLETE
+   - **Implemented:** MLflow 2.9.2 at localhost:5000
+   - **Features:** Model versioning, experiment tracking, artifact storage
+   - **Current:** Integrated with detector service via MLflowModelLoader
 
-10. **TAO Toolkit Training**
+10. **Distributed Tracing (Tempo)**
+    - **Missing:** End-to-end request tracing
+    - **Current:** Logs and metrics only
+    - **Impact:** Harder to debug cross-service issues
+
+11. **TAO Toolkit Training**
     - **Missing:** Automated retraining pipeline
-    - **Current:** Manual training
+    - **Current:** Manual training with train_with_mlflow.py
     - **Impact:** Slow iteration on model improvements
 
 ---
@@ -223,7 +228,7 @@ flowchart LR
 - **Status:** ✅ Implemented and operational
 - **Components:**
   - ✅ Prometheus 2.x (metrics collection) at localhost:9090
-  - ✅ Grafana 10.x (4 dashboards) at localhost:3000
+  - ✅ Grafana 10.x (7 dashboards) at localhost:3000
   - ✅ Loki 2.x (log aggregation) at localhost:3100
   - ✅ Promtail (log shipping)
   - ✅ cAdvisor (container metrics) at localhost:8082
@@ -406,13 +411,16 @@ flowchart LR
 - ✅ Promtail deployed for log shipping
 - ✅ cAdvisor deployed for container metrics (localhost:8082)
 - ✅ All services expose Prometheus metrics endpoints
-- ✅ 4 pre-configured dashboards operational
+- ✅ 7 pre-configured dashboards operational
 
 **Dashboards Implemented:**
 1. **ALPR Overview** - FPS, plates detected, processing latency, Kafka metrics
 2. **System Performance** - CPU, RAM, network usage per container
 3. **Kafka & Database** - Message consumption, DB writes, API performance
-4. **Logs Explorer** - Centralized log search with filtering
+4. **Search & Indexing** - OpenSearch metrics, indexing rate, search latency
+5. **Model Registry** - MLflow model metrics, experiment tracking
+6. **Service Status** - Container health, service up/down status
+7. **Logs Explorer** - Centralized log search with filtering
 
 **Metrics Exposed:**
 - `pilot.py` (port 8001): alpr_fps, alpr_plates_detected_total, alpr_processing_latency_seconds
@@ -458,116 +466,73 @@ scrape_configs:
 
 ---
 
-### 3. Alert Engine (Priority 2)
+### 3. ✅ Alert Engine (Priority 4) - COMPLETE
+
+**Implementation Status:**
+- ✅ Alert Engine service deployed (port 8003)
+- ✅ Kafka consumer with Avro deserialization
+- ✅ Rule-based matching with 6 condition operators
+- ✅ 4 notification adapters (Email/SMTP, Slack, Webhooks, SMS/Twilio)
+- ✅ Alert configuration via config/alert_rules.yaml
+- ✅ Rate limiting to prevent alert spam
+- ✅ Retry logic with exponential backoff
+- ✅ DLQ support for failed messages
+- ✅ Prometheus metrics on port 8003
 
 **Architecture:**
 ```
-Kafka Topic: alpr.plates.detected
+Kafka Topic: alpr.events.plates
   └─> Alert Consumer (Python service)
        ├─> Evaluate rules (YAML config)
        ├─> Match patterns (plate lists, zones, time windows)
        └─> Trigger notifications
 
-Alert Rules (alert_rules.yaml)
-  ├─> Watchlist plates
-  ├─> Zone violations
-  ├─> Confidence thresholds
-  └─> Rate limits
-
-Notification Channels
-  ├─> Email (SMTP)
-  ├─> Slack (webhooks)
-  ├─> SMS (Twilio)
-  └─> Webhooks (custom)
+Notification Channels (All Operational):
+  ├─> Email (SMTP) ✅
+  ├─> Slack (webhooks) ✅
+  ├─> SMS (Twilio) ✅
+  └─> Webhooks (custom) ✅
 ```
 
-**Implementation Steps:**
-1. Create `AlertEngineService` class
-2. Define alert rule schema (YAML)
-3. Implement rule evaluation logic
-4. Create notification adapters:
-   - EmailNotifier (SMTP)
-   - SlackNotifier (webhooks)
-   - SMSNotifier (Twilio)
-   - WebhookNotifier (generic)
-5. Deploy as Docker service
-6. Add admin API for rule management
-7. Test with sample alerts
-
-**Alert Rules Example:**
-```yaml
-# config/alert_rules.yaml
-rules:
-  - name: "Watchlist Match"
-    type: plate_match
-    plates:
-      - "ABC1234"
-      - "XYZ9876"
-    actions:
-      - type: email
-        to: "security@example.com"
-      - type: slack
-        channel: "#alerts"
-
-  - name: "High Confidence Detection"
-    type: threshold
-    field: plate_confidence
-    operator: ">="
-    value: 0.95
-    actions:
-      - type: webhook
-        url: "https://api.example.com/events"
-```
-
-**Estimated Effort:** 2 weeks
+**Access:** http://localhost:8003/metrics
 
 ---
 
-### 4. Elasticsearch Integration (Priority 4)
+### 4. ✅ OpenSearch Integration (Priority 5) - COMPLETE
+
+**Implementation Status:**
+- ✅ OpenSearch 2.11.0 cluster deployed (localhost:9200)
+- ✅ Elasticsearch Consumer with Avro deserialization (port 8004)
+- ✅ Adaptive bulk indexing (50 docs or 5 seconds)
+- ✅ Monthly time-based indices (alpr-events-YYYY.MM)
+- ✅ 4 search API endpoints (fulltext, facets, analytics, query)
+- ✅ Dual storage strategy (TimescaleDB + OpenSearch)
+- ✅ DLQ support for failed indexing
+- ✅ OpenSearch Dashboards at localhost:5601
+- ✅ 90-day retention with automatic cleanup
 
 **Architecture:**
 ```
-Kafka Topic: alpr.plates.detected
+Kafka Topic: alpr.events.plates
   └─> Elasticsearch Consumer (Python service)
-       └─> Index events to Elasticsearch
+       └─> Bulk index to OpenSearch
 
-Elasticsearch Cluster
-  ├─> Index: alpr-events-*
-  ├─> Full-text search on plate text
-  └─> Aggregations for analytics
+OpenSearch Cluster (Operational):
+  ├─> Index: alpr-events-YYYY.MM ✅
+  ├─> Full-text search on plate text ✅
+  └─> Aggregations for analytics ✅
 
-Query API
-  ├─> Add /search/fulltext endpoint
-  └─> Add /analytics/* endpoints
+Query API Search Endpoints:
+  ├─> /search/fulltext ✅
+  ├─> /search/facets ✅
+  ├─> /search/analytics ✅
+  └─> /search/query ✅
 ```
 
-**Implementation Steps:**
-1. Deploy Elasticsearch via Docker Compose
-2. Create index templates with mappings
-3. Create `ElasticsearchConsumer` service
-4. Consume from Kafka → index to ES
-5. Add search endpoints to Query API
-6. Create Kibana dashboards (optional)
-7. Test search and analytics
-
-**Index Mapping:**
-```json
-{
-  "mappings": {
-    "properties": {
-      "event_id": { "type": "keyword" },
-      "captured_at": { "type": "date" },
-      "plate_text": { "type": "text", "analyzer": "standard" },
-      "plate_normalized_text": { "type": "keyword" },
-      "camera_id": { "type": "keyword" },
-      "vehicle_type": { "type": "keyword" },
-      "location": { "type": "geo_point" }
-    }
-  }
-}
-```
-
-**Estimated Effort:** 2 weeks
+**Access:**
+- OpenSearch API: http://localhost:9200
+- OpenSearch Dashboards: http://localhost:5601
+- Consumer Metrics: http://localhost:8004/metrics
 
 ---
 
@@ -709,31 +674,37 @@ Backend Services
 
 ## Migration Path from Current System
 
-### Step 1: Add Object Storage (Week 1-2)
-- Deploy MinIO
-- Update pilot.py to upload images
-- Update Query API to serve presigned URLs
+### ✅ Step 1: Add Object Storage - COMPLETE
+- ✅ Deployed MinIO
+- ✅ Updated pilot.py to upload images
+- ✅ S3 URLs stored in database
 - **No breaking changes**
 
-### Step 2: Add Monitoring - ✅ COMPLETE
+### ✅ Step 2: Add Monitoring - COMPLETE
 - ✅ Deployed Prometheus + Grafana + Loki
 - ✅ Added metrics to all services
-- ✅ Created 4 dashboards
+- ✅ Created 7 dashboards
 - **No breaking changes**
 
-### Step 3: Add Alerting (Next Priority)
-- Deploy Alert Engine
-- Configure rules
-- Set up notifications
+### ✅ Step 3: Add Alerting - COMPLETE
+- ✅ Deployed Alert Engine
+- ✅ Configured rules via YAML
+- ✅ Set up 4 notification channels
 - **No breaking changes**
 
-### Step 4: Add Search (Week 6-7)
-- Deploy Elasticsearch
-- Create consumer
-- Add search endpoints
-- **Optional new feature**
+### ✅ Step 4: Add Search - COMPLETE
+- ✅ Deployed OpenSearch
+- ✅ Created Elasticsearch Consumer
+- ✅ Added 4 search endpoints
+- **No breaking changes**
 
-### Step 5: Optimize Edge (Week 8+)
+### ✅ Step 5: Add MLOps - COMPLETE
+- ✅ Deployed MLflow Model Registry
+- ✅ Integrated with detector service
+- ✅ Training pipeline operational
+- **No breaking changes**
+
+### ⏭️ Step 6: Optimize Edge (Future - Optional)
 - Migrate to DeepStream (optional)
 - **Gradual rollout**
 
@@ -766,13 +737,13 @@ Backend Services
 
 ## Conclusion
 
-**Current Status:** Production-ready ALPR system with full observability, real-time alerting, advanced search, and robust error handling (90% of original vision)
+**Current Status:** Production-ready ALPR system with full observability, real-time alerting, advanced search, MLOps, and robust error handling (95% of original vision)
 
 **Completed (Phase 3 - 100% COMPLETE ✨):**
 - ✅ Object Storage (MinIO) with async uploads
 - ✅ Schema Registry (Avro serialization)
 - ✅ Monitoring Stack (Prometheus, Grafana, Loki, Promtail, cAdvisor)
-- ✅ 5 Pre-configured Dashboards (ALPR Overview, System Performance, Kafka & Database, Search & Indexing, Logs Explorer)
+- ✅ 7 Pre-configured Dashboards (ALPR Overview, System Performance, Kafka & Database, Search & Indexing, Model Registry, Service Status, Logs Explorer)
 - ✅ Comprehensive Metrics (all services instrumented)
 - ✅ Log Aggregation (centralized logging)
 - ✅ Alert Engine (Email, Slack, Webhooks, SMS)
@@ -790,7 +761,7 @@ Backend Services
 
 **Phase 4 Complete!** ✨
 - ✅ All Phase 4 priorities complete (Schema Registry, Search, Multi-Topic Kafka, Advanced BI)
-- ✅ 31 services operational (15 core + 8 infrastructure + 6 monitoring/analytics + 2 DLQ services)
+- ✅ 22 Docker services operational (see docker compose ps for full list)
 - ✅ Full production stack with observability, search, alerts, BI, and error handling
 
 **Next Priority:** Phase 5 - Scale & Optimization (optional, for extreme scale)
@@ -816,7 +787,7 @@ Backend Services
 ✅ Docker deployment
 ✅ MinIO object storage (async image uploads)
 ✅ Prometheus metrics (all services)
-✅ Grafana dashboards (5 dashboards including Search & Indexing)
+✅ Grafana dashboards (7 dashboards including Search & Indexing, Model Registry, Service Status)
 ✅ Metabase BI analytics (localhost:3001 - executive dashboards & reports)
 ✅ Loki log aggregation
 ✅ cAdvisor container monitoring
