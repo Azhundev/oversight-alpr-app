@@ -13,7 +13,7 @@ You'll see output like:
 ```
 ✅ Event published: 91ee2923-d604-46f0-9470-6e2a99fb1bb9 | ABC123
 📤 [MOCK] Would publish to Kafka:
-  Topic: alpr.plates.detected
+  Topic: alpr.events.plates
   Key: west_gate_cam_03
   Event ID: 91ee2923-d604-46f0-9470-6e2a99fb1bb9
   Plate: ABC123
@@ -70,7 +70,7 @@ pip install kafka-python
 ```bash
 docker exec -it $(docker ps -q -f name=kafka) kafka-topics \
   --create \
-  --topic alpr.plates.detected \
+  --topic alpr.events.plates \
   --bootstrap-server localhost:9092 \
   --partitions 3 \
   --replication-factor 1
@@ -100,7 +100,7 @@ In another terminal:
 ```bash
 docker exec -it $(docker ps -q -f name=kafka) kafka-console-consumer \
   --bootstrap-server localhost:9092 \
-  --topic alpr.plates.detected \
+  --topic alpr.events.plates \
   --from-beginning
 ```
 
@@ -172,7 +172,7 @@ from services.event_processor.kafka_publisher import KafkaPublisher
 event_processor = EventProcessorService()
 kafka_publisher = KafkaPublisher(
     bootstrap_servers="localhost:9092",
-    topic="alpr.plates.detected"
+    topic="alpr.events.plates"
 )
 
 # When OCR succeeds

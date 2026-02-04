@@ -13,7 +13,7 @@ The Alert Engine is a rule-based notification system that consumes plate detecti
 │                     Alert Engine Flow                        │
 ├─────────────────────────────────────────────────────────────┤
 │                                                               │
-│  Kafka Topic: alpr.plates.detected (Avro)                   │
+│  Kafka Topic: alpr.events.plates (Avro)                   │
 │         │                                                     │
 │         ▼                                                     │
 │  ┌──────────────┐                                           │
@@ -207,7 +207,7 @@ alert-engine:
     - "8003:8003"  # Prometheus metrics
   environment:
     KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-    KAFKA_TOPIC: alpr.plates.detected
+    KAFKA_TOPIC: alpr.events.plates
     KAFKA_GROUP_ID: alpr-alert-engine
     SCHEMA_REGISTRY_URL: http://schema-registry:8081
     RULES_CONFIG_PATH: /app/config/alert_rules.yaml

@@ -71,7 +71,7 @@ docker-compose ps
 ```bash
 docker exec -it $(docker ps -q -f name=kafka) kafka-topics \
   --create \
-  --topic alpr.plates.detected \
+  --topic alpr.events.plates \
   --bootstrap-server localhost:9092 \
   --partitions 3 \
   --replication-factor 1
@@ -111,7 +111,7 @@ kafka:
 ```bash
 aws kafka create-topic \
   --cluster-arn arn:aws:kafka:us-east-1:123456789012:cluster/alpr-production/... \
-  --topic-name alpr.plates.detected \
+  --topic-name alpr.events.plates \
   --partitions 10 \
   --replication-factor 3
 ```
@@ -185,7 +185,7 @@ def __init__(self, ...):
     try:
         self.kafka_publisher = KafkaPublisher(
             bootstrap_servers="localhost:9092",  # Update for production
-            topic="alpr.plates.detected",
+            topic="alpr.events.plates",
             client_id=f"alpr-{camera_id}",
             compression_type="gzip",
             acks="all",
@@ -300,7 +300,7 @@ def cleanup(self):
 ### Recommended Topic Structure
 
 ```
-alpr.plates.detected         # Main event stream
+alpr.events.plates         # Main event stream
   └─ Partitions: 10          # Scale based on camera count
   └─ Retention: 7 days       # For ML retraining
   └─ Replication: 3          # High availability
@@ -337,7 +337,7 @@ from kafka import KafkaConsumer
 import json
 
 consumer = KafkaConsumer(
-    'alpr.plates.detected',
+    'alpr.events.plates',
     bootstrap_servers='localhost:9092',
     auto_offset_reset='earliest',
     enable_auto_commit=True,
@@ -364,7 +364,7 @@ For real-time analytics:
 // Aggregate plate reads by camera (Java example)
 StreamsBuilder builder = new StreamsBuilder();
 
-KStream<String, PlateEvent> plates = builder.stream("alpr.plates.detected");
+KStream<String, PlateEvent> plates = builder.stream("alpr.events.plates");
 
 // Count plates per camera (1-minute windows)
 KTable<Windowed<String>, Long> plateCounts = plates
@@ -385,13 +385,13 @@ plateCounts.toStream().to("alpr.analytics.camera-counts");
 # Consumer from beginning
 docker exec -it kafka kafka-console-consumer \
   --bootstrap-server localhost:9092 \
-  --topic alpr.plates.detected \
+  --topic alpr.events.plates \
   --from-beginning
 
 # Consumer with formatting
 docker exec -it kafka kafka-console-consumer \
   --bootstrap-server localhost:9092 \
-  --topic alpr.plates.detected \
+  --topic alpr.events.plates \
   --from-beginning \
   --property print.key=true \
   --property print.value=true

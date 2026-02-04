@@ -1,6 +1,6 @@
 # ALPR Monitoring Stack Setup
 
-Complete monitoring infrastructure for the ALPR system using Prometheus, Grafana, Loki, and cAdvisor.
+Complete monitoring infrastructure for the ALPR system using Prometheus, Grafana, Loki, Tempo, and cAdvisor.
 
 ## Architecture Overview
 
@@ -33,17 +33,14 @@ Complete monitoring infrastructure for the ALPR system using Prometheus, Grafana
 │                    │  (port 3000)  │                            │
 │                    └───────┬───────┘                            │
 │                            │                                     │
-│                            │                                     │
-│                            ▼                                     │
-│                    ┌───────────────┐                            │
-│                    │     Loki      │◄────┐                      │
-│                    │  (port 3100)  │     │                      │
-│                    └───────────────┘     │                      │
-│                                          │                      │
-│                                    ┌─────┴──────┐               │
-│                                    │  Promtail  │               │
-│                                    │ (log ship) │               │
-│                                    └────────────┘               │
+│              ┌─────────────┼─────────────┐                      │
+│              ▼             ▼             ▼                      │
+│      ┌───────────┐  ┌───────────┐  ┌───────────┐               │
+│      │   Loki    │  │   Tempo   │  │ Promtail  │               │
+│      │(port 3100)│  │(port 3200)│  │(log ship) │               │
+│      └───────────┘  └───────────┘  └─────┬─────┘               │
+│              ▲                           │                      │
+│              └───────────────────────────┘                      │
 │                                                                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -98,12 +95,26 @@ Complete monitoring infrastructure for the ALPR system using Prometheus, Grafana
 - **Access**: http://localhost:8082
 - **Note**: Port 8082 is used to avoid conflict with Kafka UI (port 8080)
 
+### 6. Tempo (port 3200)
+- **Purpose**: Distributed tracing backend
+- **Features**:
+  - End-to-end request tracing
+  - OpenTelemetry native support
+  - Trace-to-logs correlation with Loki
+  - Trace-to-metrics correlation with Prometheus
+- **Ports**:
+  - `3200`: Tempo API
+  - `4317`: OTLP gRPC receiver
+  - `4318`: OTLP HTTP receiver
+- **Access**: http://localhost:3200
+- **Grafana Integration**: View traces in Grafana → Explore → Tempo datasource
+
 ## Quick Start
 
 ### 1. Start the monitoring stack
 ```bash
 cd /home/jetson/OVR-ALPR
-docker compose up -d prometheus grafana loki promtail cadvisor
+docker compose up -d prometheus grafana loki promtail cadvisor tempo
 ```
 
 ### 2. Verify all services are running
@@ -117,6 +128,7 @@ Expected output should show all monitoring services as "Up":
 - alpr-loki
 - alpr-promtail
 - alpr-cadvisor
+- alpr-tempo
 
 ### 3. Access Grafana
 1. Open browser to http://localhost:3000
@@ -141,12 +153,14 @@ monitoring/
 ├── grafana/
 │   ├── provisioning/
 │   │   ├── datasources/
-│   │   │   └── datasources.yaml   # Auto-provision Prometheus + Loki
+│   │   │   └── datasources.yaml   # Auto-provision Prometheus + Loki + Tempo
 │   │   └── dashboards/
 │   │       └── dashboards.yaml    # Dashboard loading configuration
 │   └── dashboards/                # Dashboard JSON files (step 2)
 ├── loki/
 │   └── loki-config.yaml           # Loki configuration
+├── tempo/
+│   └── tempo-config.yaml          # Tempo configuration
 └── promtail/
     └── promtail-config.yaml       # Log shipping configuration
 ```
@@ -160,6 +174,15 @@ monitoring/
 | query-api | 8000 | `/metrics` | API request metrics |
 | cAdvisor | 8082 | `/metrics` | Container metrics |
 | Prometheus | 9090 | `/metrics` | Prometheus self-metrics |
+| Tempo | 3200 | `/metrics` | Tracing backend metrics |
+
+## Tracing Endpoints
+
+| Service | Port | Protocol | Description |
+|---------|------|----------|-------------|
+| Tempo | 4317 | OTLP gRPC | OpenTelemetry traces (gRPC) |
+| Tempo | 4318 | OTLP HTTP | OpenTelemetry traces (HTTP) |
+| Tempo | 3200 | HTTP | Tempo API and query |
 
 ## Key Metrics Available
 
@@ -231,10 +254,11 @@ monitoring/
 - **Prometheus**: ~200-500 MB RAM (depends on cardinality)
 - **Grafana**: ~100-200 MB RAM
 - **Loki**: ~100-300 MB RAM
+- **Tempo**: ~100-200 MB RAM
 - **Promtail**: ~50-100 MB RAM
 - **cAdvisor**: ~100-200 MB RAM
 
-**Total overhead**: ~550 MB - 1.3 GB RAM
+**Total overhead**: ~650 MB - 1.5 GB RAM
 
 ### Storage Requirements
 - **Prometheus**: ~1-2 GB/month (with 30-day retention)
@@ -250,16 +274,19 @@ monitoring/
 
 ## Next Steps
 
-1. **Create Grafana Dashboards** (Step 2)
+1. **Grafana Dashboards** - 7 pre-configured dashboards available:
    - ALPR Overview Dashboard
    - System Performance Dashboard
    - Kafka & Database Dashboard
-   - Camera Ingestion Dashboard
+   - Search & Indexing Dashboard
+   - Model Registry Dashboard
+   - Service Status Dashboard
+   - Logs Explorer Dashboard
 
-2. **Test the Stack** (Step 3)
-   - Verify metrics collection
-   - Test dashboard functionality
-   - Validate alerting (if configured)
+2. **Distributed Tracing** - Tempo is configured for:
+   - Query API request tracing (OpenTelemetry instrumented)
+   - Trace-to-logs correlation in Grafana
+   - End-to-end latency analysis
 
 3. **Optional Enhancements**
    - Add AlertManager for alerting

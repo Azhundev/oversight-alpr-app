@@ -9,6 +9,9 @@ This guide provides detailed information about the pre-built Grafana dashboards 
 | ALPR Overview | `alpr-overview` | Main dashboard for ALPR metrics (FPS, detections, latency) | 5s |
 | System Performance | `system-performance` | Container resource usage (CPU, RAM, network) | 5s |
 | Kafka & Database | `kafka-database` | Kafka consumer and database metrics | 5s |
+| Search & Indexing | `search-indexing` | OpenSearch metrics, indexing rate, search latency | 5s |
+| Model Registry | `alpr-model-registry` | MLflow model metrics, experiment tracking | 10s |
+| Service Status | `service-status` | Container health, service up/down status | 5s |
 | Logs Explorer | `logs-explorer` | Log aggregation and search | 10s |
 
 ## Dashboard Details
@@ -175,6 +178,65 @@ This guide provides detailed information about the pre-built Grafana dashboards 
 
 ---
 
+### 5. Search & Indexing
+
+**Purpose**: Monitor OpenSearch indexing and search performance.
+
+**Key Panels**:
+- **Indexing Rate** - Real-time events/sec being indexed
+- **Total Messages Indexed** - Cumulative count
+- **OpenSearch Availability** - Cluster health (0=down, 1=up)
+- **Bulk Request Duration** - p95 and p99 latency
+- **Bulk Size** - Documents per batch (p50, p95)
+- **Message Flow** - Consumed vs Indexed vs Failed
+- **Search Latency** - Query response times
+
+**Use Cases**:
+- Monitor indexing throughput
+- Identify indexing bottlenecks
+- Track search performance
+- Debug OpenSearch connectivity issues
+
+---
+
+### 6. Model Registry
+
+**Purpose**: Monitor MLflow model registry and detector performance.
+
+**Key Panels**:
+- **MLflow Server Status** - Health indicator
+- **Model Inference FPS** - Detection throughput
+- **Inference Latency** - Processing time per frame
+- **Detection Confidence** - Average confidence scores
+- **Resource Usage** - CPU/memory for detector service
+
+**Use Cases**:
+- Track model performance after deployments
+- Compare model versions
+- Monitor inference efficiency
+- Plan model optimization
+
+---
+
+### 7. Service Status
+
+**Purpose**: Overview of all service health and availability.
+
+**Key Panels**:
+- **Service Health Grid** - Up/down status for all services
+- **Container Status** - Running, stopped, restarting counts
+- **Uptime** - Service availability percentage
+- **Recent Restarts** - Container restart events
+- **Resource Alerts** - Services exceeding thresholds
+
+**Use Cases**:
+- Quick health overview
+- Identify failing services
+- Monitor service stability
+- Track system availability
+
+---
+
 ## Accessing Dashboards
 
 ### Via Grafana UI
@@ -187,6 +249,9 @@ This guide provides detailed information about the pre-built Grafana dashboards 
 - ALPR Overview: http://localhost:3000/d/alpr-overview
 - System Performance: http://localhost:3000/d/system-performance
 - Kafka & Database: http://localhost:3000/d/kafka-database
+- Search & Indexing: http://localhost:3000/d/search-indexing
+- Model Registry: http://localhost:3000/d/alpr-model-registry
+- Service Status: http://localhost:3000/d/service-status
 - Logs Explorer: http://localhost:3000/d/logs-explorer
 
 ---
@@ -390,6 +455,9 @@ Dashboards are auto-provisioned on first start. To reload:
 - Keep it open on a dedicated monitor for real-time monitoring
 - Use **System Performance** to diagnose resource issues
 - Use **Kafka & Database** for data pipeline monitoring
+- Use **Search & Indexing** for OpenSearch monitoring
+- Use **Model Registry** for MLflow and inference monitoring
+- Use **Service Status** for quick health checks
 - Use **Logs Explorer** for troubleshooting
 
 ### Alert Recommendations

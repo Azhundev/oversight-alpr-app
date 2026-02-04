@@ -23,7 +23,7 @@ The ALPR system now includes OpenSearch (Elasticsearch-compatible) for advanced 
                              ▼
                    ┌──────────────────────┐
                    │  Kafka Topic (Avro)  │
-                   │ alpr.plates.detected │
+                   │ alpr.events.plates │
                    └──────────┬───────────┘
                               │
                ┌──────────────┼──────────────┬──────────────┐
@@ -102,7 +102,7 @@ curl http://localhost:9200/_cluster/health
 **Port**: `8004` (Prometheus metrics)
 
 **Responsibilities**:
-- Consume events from Kafka topic `alpr.plates.detected`
+- Consume events from Kafka topic `alpr.events.plates`
 - Deserialize Avro messages using Schema Registry
 - Perform bulk indexing to OpenSearch
 - Export Prometheus metrics

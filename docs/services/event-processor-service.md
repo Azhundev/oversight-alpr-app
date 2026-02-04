@@ -122,7 +122,7 @@ if event:
     json_payload = event.to_json()
 
     # Publish to Kafka
-    # kafka_producer.send("alpr.plates.detected", json_payload.encode())
+    # kafka_producer.send("alpr.events.plates", json_payload.encode())
 
     # Or publish to MQTT
     # mqtt_client.publish("alpr/plates/detected", json_payload)
@@ -155,7 +155,7 @@ if plate_detection.confidence >= self.ocr_min_confidence:
 
     if event:
         # Publish to Kafka/MQTT
-        self.kafka_producer.send("alpr.plates.detected", event.to_json().encode())
+        self.kafka_producer.send("alpr.events.plates", event.to_json().encode())
 ```
 
 ## Configuration

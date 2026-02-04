@@ -139,7 +139,7 @@ python scripts/register_schemas.py
 ```
 
 **Result:**
-- Subject: `alpr.plates.detected-value`
+- Subject: `alpr.events.plates-value`
 - Schema ID: `1`
 - Version: `1`
 
@@ -167,7 +167,7 @@ from services.event_processor.avro_kafka_publisher import AvroKafkaPublisher
 publisher = AvroKafkaPublisher(
     bootstrap_servers="localhost:9092",
     schema_registry_url="http://localhost:8081",
-    topic="alpr.plates.detected"
+    topic="alpr.events.plates"
 )
 
 # Publish event
@@ -211,7 +211,7 @@ python scripts/register_schemas.py
 **Manual (curl):**
 ```bash
 curl -X POST \
-  http://localhost:8081/subjects/alpr.plates.detected-value/versions \
+  http://localhost:8081/subjects/alpr.events.plates-value/versions \
   -H 'Content-Type: application/vnd.schemaregistry.v1+json' \
   -d '{
     "schema": "$(cat schemas/plate_event.avsc | jq -c .)"
@@ -227,24 +227,24 @@ curl http://localhost:8081/subjects
 
 **Get latest schema:**
 ```bash
-curl http://localhost:8081/subjects/alpr.plates.detected-value/versions/latest
+curl http://localhost:8081/subjects/alpr.events.plates-value/versions/latest
 ```
 
 **Get specific version:**
 ```bash
-curl http://localhost:8081/subjects/alpr.plates.detected-value/versions/1
+curl http://localhost:8081/subjects/alpr.events.plates-value/versions/1
 ```
 
 ### Deleting Schemas
 
 **Soft delete (recoverable):**
 ```bash
-curl -X DELETE http://localhost:8081/subjects/alpr.plates.detected-value/versions/1
+curl -X DELETE http://localhost:8081/subjects/alpr.events.plates-value/versions/1
 ```
 
 **Hard delete (permanent):**
 ```bash
-curl -X DELETE "http://localhost:8081/subjects/alpr.plates.detected-value?permanent=true"
+curl -X DELETE "http://localhost:8081/subjects/alpr.events.plates-value?permanent=true"
 ```
 
 ---
@@ -279,7 +279,7 @@ curl -X PUT http://localhost:8081/config \
 
 **Per-subject:**
 ```bash
-curl -X PUT http://localhost:8081/config/alpr.plates.detected-value \
+curl -X PUT http://localhost:8081/config/alpr.events.plates-value \
   -H 'Content-Type: application/vnd.schemaregistry.v1+json' \
   -d '{"compatibility": "FULL"}'
 ```
@@ -366,7 +366,7 @@ Kafka UI (port 8080) shows Schema Registry integration:
 **Schema Registry:**
 ```bash
 curl http://localhost:8081/subjects
-# Returns: ["alpr.plates.detected-value"]
+# Returns: ["alpr.events.plates-value"]
 ```
 
 **Producer Stats:**

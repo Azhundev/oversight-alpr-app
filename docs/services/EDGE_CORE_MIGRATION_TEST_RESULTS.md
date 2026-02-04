@@ -114,7 +114,7 @@ curl http://localhost:8000/events/plate/RJLC469
 ✅ Connected to Kafka (Avro): kafka:29092
 ✅ Schema Registry: http://schema-registry:8081
 ✅ Connected to TimescaleDB
-✅ Subscribed to topic: alpr.plates.detected
+✅ Subscribed to topic: alpr.events.plates
 ✅ Prometheus metrics endpoint started at :8002
 ```
 
@@ -215,7 +215,7 @@ This allows code to remain unchanged inside containers while host filesystem use
 │    ↓                                         │
 │ Event Processor → Kafka Publisher           │
 └────────────────┬────────────────────────────┘
-                 │ alpr.plates.detected
+                 │ alpr.events.plates
                  ▼
 ┌─────────────────────────────────────────────┐
 │ Core Services (Docker)                      │

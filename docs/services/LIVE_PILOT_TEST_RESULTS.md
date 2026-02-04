@@ -52,7 +52,7 @@ Complete end-to-end ALPR pipeline verified with live inference, event streaming,
 │         ↓                                          │
 │ Avro Serialization + Schema Registry              │
 │         ↓                                          │
-│ Kafka Publish → alpr.plates.detected              │
+│ Kafka Publish → alpr.events.plates              │
 └────────────────┬───────────────────────────────────┘
                  │
                  ▼
@@ -60,7 +60,7 @@ Complete end-to-end ALPR pipeline verified with live inference, event streaming,
 │ CORE SERVICES (Docker)                             │
 │                                                    │
 │ ✅ Kafka Broker (localhost:9092)                  │
-│    Topic: alpr.plates.detected                    │
+│    Topic: alpr.events.plates                    │
 │    Offset 77: ALL469                              │
 │    Offset 78: 3BCYXA                              │
 │         ↓                                          │
@@ -217,7 +217,7 @@ Total CPU:     ~6%
 | PaddleOCR Recognition | ✅ | ALL469, 3BCYXA read |
 | Event Processor | ✅ | 2 events generated |
 | Avro Serialization | ✅ | Schema Registry validated |
-| Kafka Publishing | ✅ | Published to alpr.plates.detected |
+| Kafka Publishing | ✅ | Published to alpr.events.plates |
 | Kafka Consuming | ✅ | Offsets 77, 78 consumed |
 | Database Storage | ✅ | 2 events inserted |
 | Query API | ✅ | Events retrievable via REST |

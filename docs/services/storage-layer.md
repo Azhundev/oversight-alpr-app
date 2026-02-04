@@ -161,7 +161,7 @@ from services.storage.kafka_consumer import KafkaStorageConsumer
 
 consumer = KafkaStorageConsumer(
     kafka_bootstrap_servers="localhost:9092",
-    kafka_topic="alpr.plates.detected",
+    kafka_topic="alpr.events.plates",
     kafka_group_id="alpr-storage-consumer",
     db_host="localhost",
     db_port=5432,
@@ -441,7 +441,7 @@ docker compose restart timescaledb
 1. Check Kafka is running: `docker ps | grep kafka`
 2. Check consumer logs: `tail -f logs/kafka_consumer.log`
 3. Verify database connection
-4. Check Kafka topic has messages: `docker exec alpr-kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic alpr.plates.detected --from-beginning --max-messages 1`
+4. Check Kafka topic has messages: `docker exec alpr-kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic alpr.events.plates --from-beginning --max-messages 1`
 
 ### API Not Responding
 

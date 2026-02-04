@@ -43,7 +43,7 @@ All integration tests passed successfully:
 - ✅ `docker-compose.yml` - Full stack (Zookeeper + Kafka + UI)
 - ✅ `scripts/setup_kafka.sh` - Automated setup
 - ✅ Kafka UI at `http://localhost:8080`
-- ✅ Topics: `alpr.plates.detected`, `alpr.vehicles.tracked`, `alpr.system.health`
+- ✅ Topics: `alpr.events.plates`, `alpr.vehicles.tracked`, `alpr.system.health`
 
 ---
 
@@ -60,7 +60,7 @@ Output:
 ```
 ⚠️  Kafka not available, using mock publisher
 📤 [MOCK] Would publish to Kafka:
-  Topic: alpr.plates.detected
+  Topic: alpr.events.plates
   Event ID: abc-123...
   Plate: ABC123
 ```
@@ -86,7 +86,7 @@ Output:
 # Console consumer
 docker exec -it alpr-kafka kafka-console-consumer \
   --bootstrap-server localhost:9092 \
-  --topic alpr.plates.detected \
+  --topic alpr.events.plates \
   --from-beginning
 
 # Or visit Kafka UI
@@ -203,7 +203,7 @@ Edit `pilot.py` line 179:
 ```python
 self.kafka_publisher = KafkaPublisher(
     bootstrap_servers="your-broker:9092",  # Change this
-    topic="alpr.plates.detected",
+    topic="alpr.events.plates",
 )
 ```
 
