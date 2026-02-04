@@ -72,7 +72,7 @@ The system uses a **hybrid architecture** combining edge computing (Jetson) with
 │  │  └─────────────┘         └──────┬──────┘      │    │
 │  │                                 │             │    │
 │  │                          Topic:              │    │
-│  │                     alpr.plates.detected     │    │
+│  │                     alpr.events.plates     │    │
 │  └──────────────────────────────────┼───────────┘    │
 │                                     │                │
 │                    ┌────────────────┴─────────┐      │
@@ -251,7 +251,7 @@ The system uses a **hybrid architecture** combining edge computing (Jetson) with
 - Load distribution
 
 **Topics**:
-- `alpr.plates.detected` - Main event stream
+- `alpr.events.plates` - Main event stream
 
 **Configuration**:
 - 7-day message retention
@@ -375,7 +375,7 @@ Vehicle Detection (YOLOv11)
 ### Event Storage Pipeline
 
 ```
-Kafka Topic (alpr.plates.detected)
+Kafka Topic (alpr.events.plates)
     │
     ▼
 Kafka Consumer (Subscribed)
@@ -444,10 +444,28 @@ HTTP Response
 |-----------|-----------|---------|
 | Message Broker | Apache Kafka | Event streaming |
 | Database | TimescaleDB | Time-series storage |
+| Search Engine | OpenSearch | Full-text search & analytics |
+| Object Storage | MinIO | Plate image storage |
 | API Framework | FastAPI | REST API |
 | Container | Docker | Service isolation |
 | Orchestration | Docker Compose | Service management |
 | Coordination | ZooKeeper | Kafka coordination |
+
+### Monitoring & Observability (Docker)
+
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| Metrics | Prometheus | Metrics collection & alerting |
+| Visualization | Grafana | Dashboards & visualization |
+| Logging | Loki + Promtail | Log aggregation |
+| Tracing | Tempo | Distributed tracing (OTLP) |
+| BI Analytics | Metabase | Business intelligence |
+
+### MLOps (Docker)
+
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| Model Registry | MLflow | Model versioning & tracking |
 
 ## Design Decisions
 
@@ -586,16 +604,53 @@ See [README.md](README.md#scaling) for scaling guide.
 
 See [security.md](security.md) for detailed security guide.
 
+## Observability Stack
+
+The system includes comprehensive observability with the three pillars:
+
+### Metrics (Prometheus + Grafana)
+- System and container metrics via cAdvisor, Node Exporter
+- Application metrics from all services
+- Custom dashboards for ALPR operations
+- Alerting rules for anomaly detection
+
+### Logging (Loki + Promtail)
+- Centralized log aggregation from all containers
+- LogQL queries for log analysis
+- Integration with Grafana for visualization
+- 7-day retention policy
+
+### Tracing (Tempo + OpenTelemetry)
+- Distributed tracing across services
+- OTLP protocol support (gRPC port 4317, HTTP port 4318)
+- Query API instrumented with OpenTelemetry
+- Trace-to-log correlation via trace_id
+- Service dependency visualization
+
+### Access URLs
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| Grafana | http://localhost:3000 | Dashboards & Explore |
+| Prometheus | http://localhost:9090 | Metrics queries |
+| Tempo | http://localhost:3200 | Trace queries |
+| Metabase | http://localhost:3001 | BI analytics |
+| MLflow | http://localhost:5000 | Model registry |
+
 ## Future Enhancements
 
 ### Planned Features
 
 1. **Kubernetes Support**: Deploy on K8s clusters
 2. **Authentication**: JWT-based API auth
-3. **Real-time Alerts**: Webhook notifications
-4. **Analytics Dashboard**: Real-time visualizations
-5. **Multi-Region Deployment**: Geo-distributed setup
-6. **ML Model Updates**: Hot-swap detection models
+3. **Multi-Region Deployment**: Geo-distributed setup
+
+### Completed Features
+- ✅ Real-time Alerts (Alert Engine with multi-channel notifications)
+- ✅ Analytics Dashboard (Grafana + Metabase)
+- ✅ Distributed Tracing (Tempo + OpenTelemetry)
+- ✅ Model Registry (MLflow)
+- ✅ ML Model Updates (MLflow model versioning)
 
 ### Research Areas
 

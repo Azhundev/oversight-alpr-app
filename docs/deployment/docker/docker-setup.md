@@ -4,13 +4,39 @@ This document explains how Docker is used in the OVR-ALPR project for managing i
 
 ## Overview
 
-The project uses Docker Compose to orchestrate multiple services that support the ALPR pipeline:
+The project uses Docker Compose to orchestrate **24+ services** that support the ALPR pipeline:
 
+**Data Infrastructure:**
 - **ZooKeeper**: Coordination service for Kafka
 - **Kafka**: Message broker for event streaming
+- **Schema Registry**: Avro schema management
 - **Kafka UI**: Web interface for monitoring Kafka
 - **TimescaleDB**: Time-series database for storing plate detections
-- **Kafka Consumer**: Service that consumes plate events and stores them in the database
+- **MinIO**: S3-compatible object storage for plate images
+- **OpenSearch**: Full-text search and analytics engine
+
+**Application Services:**
+- **Kafka Consumer**: Consumes plate events and stores in database
+- **Elasticsearch Consumer**: Indexes events in OpenSearch
+- **Alert Engine**: Real-time alerting and notifications
+- **Query API**: REST API for querying events
+- **DLQ Consumer**: Dead letter queue monitoring
+- **Metrics Consumer**: System metrics aggregation
+
+**Monitoring & Observability:**
+- **Prometheus**: Metrics collection
+- **Grafana**: Visualization dashboards
+- **Loki**: Log aggregation
+- **Tempo**: Distributed tracing (OTLP)
+- **Promtail**: Log shipping
+- **cAdvisor**: Container metrics
+- **Node Exporter**: Host system metrics
+- **Postgres Exporter**: TimescaleDB metrics
+- **Kafka Exporter**: Kafka broker metrics
+
+**BI & MLOps:**
+- **Metabase**: Business intelligence and analytics
+- **MLflow**: Model registry and experiment tracking
 
 ## Architecture
 
@@ -25,7 +51,7 @@ The project uses Docker Compose to orchestrate multiple services that support th
 │     Kafka       │◄──── ZooKeeper
 │  (Port 9092)    │
 └────────┬────────┘
-         │ topic: alpr.plates.detected
+         │ topic: alpr.events.plates
          ▼
 ┌─────────────────┐
 │ Kafka Consumer  │
@@ -54,7 +80,7 @@ The project uses Docker Compose to orchestrate multiple services that support th
   - 29092 (internal Docker network)
   - 9101 (JMX metrics)
 - **Purpose**: Message broker for event streaming
-- **Topics**: `alpr.plates.detected`
+- **Topics**: `alpr.events.plates`
 - **Data**: Persisted in `kafka-data` volume
 - **Retention**: 7 days (168 hours)
 
@@ -154,7 +180,7 @@ The Kafka Consumer service is configured via environment variables in `docker-co
 environment:
   # Kafka configuration
   KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-  KAFKA_TOPIC: alpr.plates.detected
+  KAFKA_TOPIC: alpr.events.plates
   KAFKA_GROUP_ID: alpr-storage-consumer
   # Database configuration
   DB_HOST: timescaledb
@@ -334,9 +360,30 @@ All services communicate on the `alpr-network` bridge network:
 | ZooKeeper | 2181 | 2181 | Coordination |
 | Kafka | 29092 | 9092 | Message broker |
 | Kafka JMX | 9101 | 9101 | Metrics |
-| Kafka UI | 8080 | 8080 | Web interface |
+| Schema Registry | 8081 | 8081 | Avro schemas |
+| Kafka UI | 8080 | 8080 | Kafka web interface |
 | TimescaleDB | 5432 | 5432 | Database |
+| MinIO API | 9000 | 9000 | Object storage |
+| MinIO Console | 9001 | 9001 | MinIO web UI |
+| OpenSearch | 9200 | 9200 | Search engine |
+| OpenSearch Dashboards | 5601 | 5601 | Search UI |
 | Query API | 8000 | 8000 | REST API |
+| Alert Engine | 8003 | 8003 | Alert metrics |
+| Elasticsearch Consumer | 8004 | 8004 | Indexer metrics |
+| DLQ Consumer | 8005 | 8005 | DLQ metrics |
+| Metrics Consumer | 8006 | 8006 | Metrics aggregation |
+| Grafana | 3000 | 3000 | Dashboards |
+| Metabase | 3000 | 3001 | BI analytics |
+| Prometheus | 9090 | 9090 | Metrics DB |
+| Loki | 3100 | 3100 | Log aggregation |
+| Tempo | 3200 | 3200 | Tracing API |
+| Tempo OTLP gRPC | 4317 | 4317 | Trace ingestion |
+| Tempo OTLP HTTP | 4318 | 4318 | Trace ingestion |
+| cAdvisor | 8080 | 8082 | Container metrics |
+| Node Exporter | 9100 | 9100 | Host metrics |
+| Postgres Exporter | 9187 | 9187 | DB metrics |
+| Kafka Exporter | 9308 | 9308 | Kafka metrics |
+| MLflow | 5000 | 5000 | Model registry |
 
 ## Best Practices
 

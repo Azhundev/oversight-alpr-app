@@ -166,6 +166,41 @@ docker exec alpr-timescaledb pg_isready -U alpr -d alpr_db
 
 # Check Kafka broker
 docker exec alpr-kafka kafka-broker-api-versions --bootstrap-server localhost:9092
+
+# Check Tempo (distributed tracing)
+curl http://localhost:3200/ready
+
+# Check OpenSearch
+curl http://localhost:9200/_cluster/health
+
+# Check MLflow
+curl http://localhost:5000/health
+```
+
+### Service URLs
+
+```bash
+# Core Services
+Query API:          http://localhost:8000/docs
+Service Manager:    http://localhost:8000/services/dashboard
+
+# Monitoring & Observability
+Grafana:            http://localhost:3000  (admin/alpr_admin_2024)
+Prometheus:         http://localhost:9090
+Tempo:              http://localhost:3200
+Loki:               http://localhost:3100
+
+# BI & Analytics
+Metabase:           http://localhost:3001
+
+# MLOps
+MLflow:             http://localhost:5000
+
+# Data Management
+Kafka UI:           http://localhost:8080
+MinIO Console:      http://localhost:9001
+OpenSearch:         http://localhost:9200
+OpenSearch UI:      http://localhost:5601
 ```
 
 ### Resource Usage
@@ -219,7 +254,7 @@ docker exec alpr-kafka kafka-topics --bootstrap-server localhost:9092 --list
 docker exec alpr-kafka kafka-topics \
   --bootstrap-server localhost:9092 \
   --describe \
-  --topic alpr.plates.detected
+  --topic alpr.events.plates
 
 # Consumer group status
 docker exec alpr-kafka kafka-consumer-groups \
@@ -230,7 +265,7 @@ docker exec alpr-kafka kafka-consumer-groups \
 # Consume messages (for testing)
 docker exec alpr-kafka kafka-console-consumer \
   --bootstrap-server localhost:9092 \
-  --topic alpr.plates.detected \
+  --topic alpr.events.plates \
   --from-beginning \
   --max-messages 10
 ```
@@ -417,7 +452,7 @@ DB_PASSWORD=your_secure_password
 
 # Kafka
 KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-KAFKA_TOPIC=alpr.plates.detected
+KAFKA_TOPIC=alpr.events.plates
 
 # API
 API_PORT=8000
@@ -599,6 +634,11 @@ alias alpr-run='cd /home/jetson/OVR-ALPR && python3 pilot.py'
 # Database shortcuts
 alias alpr-db='docker exec -it alpr-timescaledb psql -U alpr -d alpr_db'
 alias alpr-stats='curl -s http://localhost:8000/stats | python3 -m json.tool'
+
+# Monitoring shortcuts
+alias alpr-services='curl -s http://localhost:8000/services/status | python3 -m json.tool'
+alias alpr-tempo='curl -s http://localhost:3200/ready'
+alias alpr-health='curl -s http://localhost:8000/health && curl -s http://localhost:3200/ready && curl -s http://localhost:9200/_cluster/health'
 ```
 
 Reload bashrc:

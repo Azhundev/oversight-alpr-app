@@ -87,7 +87,7 @@ MESSAGING LAYER (Docker on same Jetson or separate server)
 
 ┌─────────────────────────┐
 │  Apache Kafka Broker    │  ◄── Event streaming
-│  (Confluent CP 7.5.0)   │      Topic: alpr.plates.detected
+│  (Confluent CP 7.5.0)   │      Topic: alpr.events.plates
 │  - Message buffering    │      10,000+ msg/s capacity
 │  - Partitioning         │      7-day retention
 │  - Consumer groups      │      GZIP compression
