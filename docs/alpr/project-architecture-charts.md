@@ -1,6 +1,6 @@
 # OVR-ALPR System Architecture - Mermaid Chart
 
-**Last Updated:** 2026-02-01
+**Last Updated:** 2026-02-03
 
 This document contains the Mermaid chart visualization of the complete OVR-ALPR system architecture based on the current implementation status.
 
@@ -59,6 +59,7 @@ flowchart TB
             GRAF["📈 Grafana<br/>✅ PRODUCTION<br/>5 Dashboards<br/>localhost:3000"]
             METABASE["📊 Metabase<br/>✅ PRODUCTION<br/>Business Intelligence<br/>localhost:3001"]
             LOKI["📝 Loki<br/>✅ PRODUCTION<br/>Log aggregation<br/>7-day retention"]
+            TEMPO["🔍 Tempo<br/>✅ PRODUCTION<br/>Distributed tracing<br/>localhost:3200"]
             PTAIL["🚚 Promtail<br/>✅ PRODUCTION<br/>Log shipping"]
             CADV["📦 cAdvisor<br/>✅ PRODUCTION<br/>Container metrics<br/>localhost:8082"]
             NODE["💻 Node Exporter<br/>✅ PRODUCTION<br/>Host metrics<br/>localhost:9100"]
@@ -148,6 +149,8 @@ flowchart TB
     PROM -.->|"Scrape"| CADV
     GRAF -.->|"Query"| PROM
     GRAF -.->|"Query"| LOKI
+    GRAF -.->|"Query"| TEMPO
+    API -.->|"Traces"| TEMPO
     METABASE <-->|"SQL queries"| TSDB
     PTAIL -.->|"Ship logs"| LOKI
     CADV -.->|"Export metrics"| PROM
@@ -160,7 +163,7 @@ flowchart TB
     classDef schema fill:#E6E6FA,stroke:#9370DB,stroke-width:2px,color:#000
     classDef client fill:#87CEEB,stroke:#4682B4,stroke-width:2px,color:#000
 
-    class CAM,DET,TRK,OCR,EVT,PUB,IMG,ZK,KAFKA,SR,UI,CONS,STORE,TSDB,MINIO,ESCONS,OPENSEARCH,ALERT,API,PROM,GRAF,METABASE,LOKI,PTAIL,CADV,MLFLOW production
+    class CAM,DET,TRK,OCR,EVT,PUB,IMG,ZK,KAFKA,SR,UI,CONS,STORE,TSDB,MINIO,ESCONS,OPENSEARCH,ALERT,API,PROM,GRAF,METABASE,LOKI,TEMPO,PTAIL,CADV,MLFLOW production
     class CFG1,CFG2,CFG3 config
     class SCHEMA schema
     class CLIENT,ADMIN client
@@ -172,9 +175,9 @@ flowchart TB
 
 ```mermaid
 pie title "Implementation Status (By Component Count)"
-    "Fully Implemented (Production)" : 29
+    "Fully Implemented (Production)" : 30
     "Partially Implemented" : 0
-    "Not Implemented" : 1
+    "Not Implemented" : 0
 ```
 
 ---
