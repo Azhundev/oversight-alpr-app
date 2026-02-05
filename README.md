@@ -2,7 +2,7 @@
 
 **Enterprise-grade ALPR system with distributed architecture** for real-time vehicle detection, license plate recognition, event streaming, and business intelligence.
 
-[![Status](https://img.shields.io/badge/status-enterprise--ready-green)]() [![Phase](https://img.shields.io/badge/phase-4-blue)]() [![Cameras](https://img.shields.io/badge/cameras-1--10-orange)]()
+[![Status](https://img.shields.io/badge/status-enterprise--ready-green)]() [![Phase](https://img.shields.io/badge/phase-6-blue)]() [![Services](https://img.shields.io/badge/services-25-purple)]() [![Cameras](https://img.shields.io/badge/cameras-1--10-orange)]()
 
 ---
 
@@ -87,7 +87,7 @@ python3 pilot.py --help
                  │
                  ▼
 ┌─────────────────────────────────────────────────────┐
-│    BACKEND (Docker - 36 Services)                   │
+│    BACKEND (Docker - 25 Services)                   │
 │                                                      │
 │  Kafka → [Storage Consumer → TimescaleDB]           │
 │       ↓  [Elasticsearch Consumer → OpenSearch]      │
@@ -177,38 +177,61 @@ python3 pilot.py --help
 ```
 OVR-ALPR/
 ├── pilot.py                    # Main ALPR pipeline
-├── docker-compose.yml          # Backend services
+├── docker-compose.yml          # Backend services (25 containers)
 ├── requirements.txt            # Python dependencies
 │
 ├── config/                     # YAML configurations
-│   ├── cameras.yaml           # Camera definitions
+│   ├── README.md              # Config documentation
+│   ├── cameras.yaml           # Camera/video sources
+│   ├── detection.yaml         # YOLOv11 settings
+│   ├── ocr.yaml               # PaddleOCR settings
 │   ├── tracking.yaml          # ByteTrack parameters
-│   └── ocr.yaml               # PaddleOCR settings
+│   ├── kafka.yaml             # Kafka producer config
+│   ├── alert_rules.yaml       # Alert rules & notifications
+│   └── ...                    # See config/README.md
 │
 ├── edge_services/             # Edge device services (Jetson)
 │   ├── camera/                # Video ingestion
-│   ├── detector/              # YOLO detection
+│   ├── detector/              # YOLO detection + MLflow loader
 │   ├── tracker/               # ByteTrack tracking
 │   ├── ocr/                   # PaddleOCR service
 │   └── event_processor/       # Event validation & publishing
 │
 ├── core_services/             # Backend services (Docker)
-│   ├── storage/               # Kafka → TimescaleDB consumer
-│   ├── api/                   # Query API (FastAPI)
-│   ├── alerting/              # Alert Engine (notifications)
+│   ├── storage/               # Kafka consumers (main, DLQ, metrics)
+│   ├── api/                   # Query API + Service Manager
+│   ├── alerting/              # Alert Engine (multi-channel)
 │   ├── mlflow/                # MLflow Model Registry
-│   └── monitoring/            # Prometheus, Grafana, Loki
+│   └── monitoring/            # Prometheus, Grafana, Loki, Tempo
 │
-├── scripts/                    # Utility scripts
-│   ├── init_db.sql            # Database initialization
-│   └── *.py                   # Helper scripts
+├── scripts/                   # Utility scripts (organized)
+│   ├── README.md              # Script documentation
+│   ├── database/              # SQL init and migrations
+│   ├── training/              # Model training scripts
+│   ├── tensorrt/              # TensorRT export scripts
+│   ├── kafka/                 # Kafka setup scripts
+│   ├── mlflow/                # Model registration
+│   └── utilities/             # System helpers
 │
-└── docs/                       # Documentation
-    └── alpr/
-        ├── services-overview.md      # Complete service reference
-        ├── project-status.md         # Current implementation status
-        ├── next-steps.md             # Roadmap & next priorities
-        └── project-architecture-chart.md  # Architecture diagrams
+├── models/                    # ML model files
+│   ├── yolo11n.pt             # Vehicle detector
+│   ├── yolo11n-plate.pt       # Plate detector
+│   └── *.engine               # TensorRT engines
+│
+└── docs/                      # Documentation
+    ├── alpr/                  # Project overview docs
+    ├── services/              # Service documentation (organized)
+    │   ├── README.md          # Service docs index
+    │   ├── Alerts/            # Alert engine docs
+    │   ├── Infrastructure/    # Service management docs
+    │   ├── Kafka/             # Kafka setup guides
+    │   ├── MLFlow/            # Model registry & training
+    │   ├── Monitoring/        # Grafana, Prometheus, Loki
+    │   ├── Search/            # OpenSearch integration
+    │   ├── Storage/           # TimescaleDB, MinIO
+    │   ├── TensorRT/          # Model optimization
+    │   └── Testing/           # Test results
+    └── deployment/            # Deployment guides
 ```
 
 ---
@@ -218,20 +241,26 @@ OVR-ALPR/
 ### Getting Started
 - **[Deployment Guide](docs/alpr/README.md)** - Complete deployment instructions
 - **[Port Reference](docs/alpr/port-reference.md)** - All service ports and URLs
+- **[Quick Reference](docs/deployment/quick-reference.md)** - Common commands
 
 ### Architecture & Design
-- **[Services Overview](docs/alpr/services-overview.md)** - All 36 services documented
+- **[Services Overview](docs/alpr/services-overview.md)** - All 25 services documented
 - **[Architecture Chart](docs/alpr/project-architecture-chart.md)** - Mermaid architecture diagrams
-- **[Storage Layer](docs/storage-layer.md)** - TimescaleDB schema and queries
+- **[Storage Layer](docs/services/Storage/storage-layer.md)** - TimescaleDB schema and queries
 
 ### Status & Roadmap
 - **[Project Status](docs/alpr/project-status.md)** - What's implemented vs planned
 - **[Next Steps](docs/alpr/next-steps.md)** - Detailed roadmap with priorities
 
-### Technical Guides
-- **[Kafka Setup](docs/kafka-setup.md)** - Message broker configuration
-- **[Jetson Setup](docs/Jetson/JETSON_SETUP.md)** - Hardware platform setup
-- **[TensorRT Export](docs/TENSORRT_EXPORT.md)** - Model optimization
+### Service Documentation
+- **[Services Index](docs/services/README.md)** - All service documentation
+- **[Kafka Setup](docs/services/Kafka/kafka-setup.md)** - Message broker configuration
+- **[MLflow Registry](docs/services/MLFlow/mlflow-model-registry.md)** - Model versioning
+- **[Model Training](docs/services/MLFlow/model-training-guide.md)** - Training YOLO & OCR
+- **[TensorRT Export](docs/services/TensorRT/TENSORRT_EXPORT.md)** - Model optimization
+- **[Monitoring Stack](docs/services/Monitoring/monitoring-stack-setup.md)** - Prometheus, Grafana, Loki
+- **[OpenSearch](docs/services/Search/OpenSearch_Integration.md)** - Full-text search
+- **[Alert Engine](docs/services/Alerts/alert-engine.md)** - Notifications
 
 ---
 
@@ -300,7 +329,7 @@ KAFKA_TOPIC=alpr.plates.detected
 | SQL Database | ✅ Complete | TimescaleDB with hypertables |
 | Search Engine | ✅ Complete | OpenSearch with full-text search |
 | Query API | ✅ Complete | FastAPI with SQL + search endpoints |
-| Docker Deployment | ✅ Complete | 36 services containerized |
+| Docker Deployment | ✅ Complete | 25 services containerized |
 | Object Storage | ✅ Complete | MinIO with async uploads |
 | Monitoring Stack | ✅ Complete | Prometheus + Grafana + Loki |
 | Business Intelligence | ✅ Complete | Metabase analytics & reports |
@@ -521,7 +550,7 @@ Proprietary - Enterprise Use Only
 
 - **Project Lead:** Azhundev
 - **AI Assistant:** Claude Code (Anthropic)
-- **Documentation:** Last updated 2026-02-03
+- **Documentation:** Last updated 2026-02-04
 
 ---
 
