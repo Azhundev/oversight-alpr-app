@@ -111,8 +111,8 @@ services:
       POSTGRES_DB: alpr_db
     volumes:
       - timescaledb-data:/var/lib/postgresql/data
-      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01_init_db.sql
-      - ./scripts/init_mlflow_db.sql:/docker-entrypoint-initdb.d/02_init_mlflow_db.sql
+      - ./scripts/database/init_db.sql:/docker-entrypoint-initdb.d/01_init_db.sql
+      - ./scripts/database/init_mlflow_db.sql:/docker-entrypoint-initdb.d/02_init_mlflow_db.sql
     networks:
       - alpr-network
     restart: unless-stopped
