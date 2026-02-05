@@ -1,3 +1,7 @@
+# OpenSearch Configuration
+# Note: File named elasticsearch.yaml for backwards compatibility
+# OpenSearch is an Elasticsearch-compatible fork used by this project
+
 opensearch:
   hosts:
     - "http://localhost:9200"
