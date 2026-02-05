@@ -154,7 +154,7 @@ Dead Letter Queue envelope for failed message processing.
 Use the provided script to register all schemas:
 
 ```bash
-python scripts/register_schemas.py
+python scripts/kafka/register_schemas.py
 ```
 
 ### Manual Registration

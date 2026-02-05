@@ -59,8 +59,8 @@ http://localhost:8080           # Kafka UI
 http://localhost:9001           # MinIO Console
 
 # MLflow Model Registry
-python scripts/register_existing_models.py  # Register current models
-python scripts/train_with_mlflow.py --data plates.yaml --epochs 100  # Train with tracking
+python scripts/mlflow/register_existing_models.py  # Register current models
+python scripts/training/train_with_mlflow.py --data plates.yaml --epochs 100  # Train with tracking
 ```
 
 ### Service Dependencies
@@ -93,8 +93,8 @@ python scripts/train_with_mlflow.py --data plates.yaml --epochs 100  # Train wit
 5. **Search plates**: Use search endpoints at http://localhost:8000/docs#/default/search_fulltext_search_fulltext_get
 6. **Debug Kafka**: Use Kafka UI at http://localhost:8080
 7. **Check OpenSearch**: http://localhost:9200/_cluster/health
-8. **Register models**: Run `python scripts/register_existing_models.py`
-9. **Train with tracking**: Run `python scripts/train_with_mlflow.py --data plates.yaml`
+8. **Register models**: Run `python scripts/mlflow/register_existing_models.py`
+9. **Train with tracking**: Run `python scripts/training/train_with_mlflow.py --data plates.yaml`
 10. **View traces**: Grafana → Explore → Select "Tempo" datasource
 
 ### Current System Status

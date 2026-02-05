@@ -598,8 +598,8 @@ yolo export model=best.pt format=engine device=0 half=True
 - Artifact Store: MinIO (`mlflow-artifacts` bucket)
 
 **Key Scripts:**
-- `scripts/register_existing_models.py` - Register current models
-- `scripts/train_with_mlflow.py` - Train with experiment tracking
+- `scripts/mlflow/register_existing_models.py` - Register current models
+- `scripts/training/train_with_mlflow.py` - Train with experiment tracking
 
 ---
 

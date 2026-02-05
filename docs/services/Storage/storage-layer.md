@@ -295,7 +295,7 @@ docker compose up -d timescaledb
 docker exec alpr-timescaledb pg_isready -U alpr -d alpr_db
 
 # Initialize schema (first time only)
-docker exec -i alpr-timescaledb psql -U alpr -d alpr_db < scripts/init_db.sql
+docker exec -i alpr-timescaledb psql -U alpr -d alpr_db < scripts/database/init_db.sql
 ```
 
 ### 3. Start All Services

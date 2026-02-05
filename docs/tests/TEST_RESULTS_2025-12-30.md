@@ -21,7 +21,7 @@
 - ✅ Implemented automatic version checking in `detector_service.py`
 - ✅ Created version tracking files (`.engine.version`)
 - ✅ Auto-rebuild on version mismatch
-- ✅ Created helper script: `scripts/rebuild_tensorrt_engines.sh`
+- ✅ Created helper script: `scripts/tensorrt/rebuild_tensorrt_engines.sh`
 - ✅ Fixed Python import shadowing in `pilot.py`
 
 **Result:**
@@ -171,7 +171,7 @@
 |------|---------|
 | `models/yolo11n.engine.version` | Version tracking for vehicle model |
 | `models/yolo11n-plate.engine.version` | Version tracking for plate model |
-| `scripts/rebuild_tensorrt_engines.sh` | Helper script for manual rebuilds |
+| `scripts/tensorrt/rebuild_tensorrt_engines.sh` | Helper script for manual rebuilds |
 | `docs/deployment/TENSORRT_VERSION_FIX.md` | Complete documentation |
 | `TEST_RESULTS_2025-12-30.md` | This file |
 
@@ -241,7 +241,7 @@
 ### Manual Rebuild (If Ever Needed):
 ```bash
 cd /home/jetson/OVR-ALPR
-./scripts/rebuild_tensorrt_engines.sh
+./scripts/tensorrt/rebuild_tensorrt_engines.sh
 ```
 
 ### Monitoring Logs:
@@ -276,4 +276,4 @@ python3 pilot.py
 For questions or issues, refer to:
 - `docs/deployment/TENSORRT_VERSION_FIX.md` - TensorRT fix details
 - `docs/alpr/next-steps.md` - Project roadmap
-- `scripts/rebuild_tensorrt_engines.sh` - Manual rebuild helper
+- `scripts/tensorrt/rebuild_tensorrt_engines.sh` - Manual rebuild helper

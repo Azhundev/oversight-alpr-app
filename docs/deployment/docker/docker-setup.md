@@ -97,7 +97,7 @@ The project uses Docker Compose to orchestrate **24+ services** that support the
 - **Database**: `alpr_db`
 - **User**: `alpr`
 - **Data**: Persisted in `timescaledb-data` volume
-- **Schema**: Initialized from `scripts/init_db.sql`
+- **Schema**: Initialized from `scripts/database/init_db.sql`
 
 ### Kafka Consumer
 - **Container**: `alpr-kafka-consumer`

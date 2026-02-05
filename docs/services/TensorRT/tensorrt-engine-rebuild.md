@@ -66,16 +66,16 @@ Use the rebuild script to build all engines in one go:
 
 ```bash
 # Rebuild all engines with FP16 precision (recommended)
-python3 scripts/rebuild_tensorrt_engines.py
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py
 
 # Rebuild only vehicle detection engine
-python3 scripts/rebuild_tensorrt_engines.py --models vehicle
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py --models vehicle
 
 # Rebuild only plate detection engine
-python3 scripts/rebuild_tensorrt_engines.py --models plate
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py --models plate
 
 # Rebuild with custom workspace size (if you have more GPU memory)
-python3 scripts/rebuild_tensorrt_engines.py --workspace 4
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py --workspace 4
 ```
 
 ### Option 3: INT8 Quantization (Experimental)
@@ -84,7 +84,7 @@ For maximum performance with INT8 quantization:
 
 ```bash
 # Rebuild with INT8 (requires calibration data)
-python3 scripts/rebuild_tensorrt_engines.py --precision int8 --calibration calibration.yaml
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py --precision int8 --calibration calibration.yaml
 ```
 
 ⚠️ **Warning**: INT8 mode is currently unstable on Jetson and may cause crashes. Stick with FP16 for production use.
@@ -94,7 +94,7 @@ python3 scripts/rebuild_tensorrt_engines.py --precision int8 --calibration calib
 ### Full Command Reference
 
 ```bash
-python3 scripts/rebuild_tensorrt_engines.py [OPTIONS]
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py [OPTIONS]
 
 Options:
   --precision {fp16,int8}   TensorRT precision mode (default: fp16)
@@ -109,7 +109,7 @@ Options:
 #### Rebuild All Models (Default)
 
 ```bash
-python3 scripts/rebuild_tensorrt_engines.py
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py
 ```
 
 Output:
@@ -151,13 +151,13 @@ Batch Size:  1
 #### Rebuild Only Vehicle Model
 
 ```bash
-python3 scripts/rebuild_tensorrt_engines.py --models vehicle
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py --models vehicle
 ```
 
 #### Rebuild with Larger Workspace
 
 ```bash
-python3 scripts/rebuild_tensorrt_engines.py --workspace 4
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py --workspace 4
 ```
 
 Use larger workspace (4+ GB) if you have more GPU memory available. This can improve build quality and performance.
@@ -232,7 +232,7 @@ ls -lh models/*.engine
 
 If missing, rebuild them:
 ```bash
-python3 scripts/rebuild_tensorrt_engines.py
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py
 ```
 
 ### Slow Loading
@@ -244,7 +244,7 @@ python3 scripts/rebuild_tensorrt_engines.py
 **Solution**: Delete and rebuild engines:
 ```bash
 rm models/*.engine
-python3 scripts/rebuild_tensorrt_engines.py
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py
 ```
 
 ### CUDA Out of Memory
@@ -253,7 +253,7 @@ python3 scripts/rebuild_tensorrt_engines.py
 
 **Solution**: Reduce workspace size:
 ```bash
-python3 scripts/rebuild_tensorrt_engines.py --workspace 1
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py --workspace 1
 ```
 
 Or close other GPU-intensive applications before rebuilding.
@@ -276,7 +276,7 @@ Or close other GPU-intensive applications before rebuilding.
 
 3. Try rebuilding with smaller workspace:
    ```bash
-   python3 scripts/rebuild_tensorrt_engines.py --workspace 1
+   python3 scripts/tensorrt/rebuild_tensorrt_engines.py --workspace 1
    ```
 
 ## Best Practices
@@ -302,7 +302,7 @@ Or close other GPU-intensive applications before rebuilding.
 cp runs/detect/train/weights/best.pt models/yolo11n-plate.pt
 
 # Rebuild plate detection engine
-python3 scripts/rebuild_tensorrt_engines.py --models plate
+python3 scripts/tensorrt/rebuild_tensorrt_engines.py --models plate
 
 # Test with ALPR
 python3 pilot.py

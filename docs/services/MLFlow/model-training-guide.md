@@ -175,7 +175,7 @@ yolo detect train \
 
 ```bash
 # Train with experiment tracking (recommended)
-python scripts/train_with_mlflow.py \
+python scripts/training/train_with_mlflow.py \
     --data datasets/plates/plates.yaml \
     --model yolo11n.pt \
     --epochs 100 \
@@ -629,7 +629,7 @@ yolo export model=best.pt format=engine half=True workspace=2
 yolo detect train data=plates.yaml model=yolo11n.pt epochs=100
 
 # With MLflow
-python scripts/train_with_mlflow.py --data plates.yaml --epochs 100
+python scripts/training/train_with_mlflow.py --data plates.yaml --epochs 100
 
 # Resume training
 yolo detect train data=plates.yaml resume=True

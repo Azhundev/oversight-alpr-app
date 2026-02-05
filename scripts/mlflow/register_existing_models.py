@@ -10,7 +10,7 @@ Models registered:
 - alpr-plate-detector: yolo11n-plate.pt (Custom trained for license plates)
 
 Usage:
-    python scripts/register_existing_models.py
+    python scripts/mlflow/register_existing_models.py
 
 Environment Variables:
     MLFLOW_TRACKING_URI: MLflow server URL (default: http://localhost:5000)

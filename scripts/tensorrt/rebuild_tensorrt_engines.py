@@ -7,11 +7,11 @@ Pre-building engines ensures they are cached and reused on every ALPR run,
 eliminating the first-time export delay.
 
 Usage:
-    python3 scripts/rebuild_tensorrt_engines.py
-    python3 scripts/rebuild_tensorrt_engines.py --precision fp16
-    python3 scripts/rebuild_tensorrt_engines.py --precision int8 --calibration calibration.yaml
-    python3 scripts/rebuild_tensorrt_engines.py --models vehicle  # Only rebuild vehicle model
-    python3 scripts/rebuild_tensorrt_engines.py --models plate    # Only rebuild plate model
+    python3 scripts/tensorrt/rebuild_tensorrt_engines.py
+    python3 scripts/tensorrt/rebuild_tensorrt_engines.py --precision fp16
+    python3 scripts/tensorrt/rebuild_tensorrt_engines.py --precision int8 --calibration calibration.yaml
+    python3 scripts/tensorrt/rebuild_tensorrt_engines.py --models vehicle  # Only rebuild vehicle model
+    python3 scripts/tensorrt/rebuild_tensorrt_engines.py --models plate    # Only rebuild plate model
 """
 
 import argparse
@@ -207,19 +207,19 @@ def main():
         epilog="""
 Examples:
   # Rebuild all models with FP16 precision (recommended)
-  python3 scripts/rebuild_tensorrt_engines.py
+  python3 scripts/tensorrt/rebuild_tensorrt_engines.py
 
   # Rebuild with INT8 precision (requires calibration data)
-  python3 scripts/rebuild_tensorrt_engines.py --precision int8 --calibration calibration.yaml
+  python3 scripts/tensorrt/rebuild_tensorrt_engines.py --precision int8 --calibration calibration.yaml
 
   # Rebuild only vehicle detection model
-  python3 scripts/rebuild_tensorrt_engines.py --models vehicle
+  python3 scripts/tensorrt/rebuild_tensorrt_engines.py --models vehicle
 
   # Rebuild only plate detection model
-  python3 scripts/rebuild_tensorrt_engines.py --models plate
+  python3 scripts/tensorrt/rebuild_tensorrt_engines.py --models plate
 
   # Custom workspace size (for systems with more GPU memory)
-  python3 scripts/rebuild_tensorrt_engines.py --workspace 4
+  python3 scripts/tensorrt/rebuild_tensorrt_engines.py --workspace 4
         """
     )
 

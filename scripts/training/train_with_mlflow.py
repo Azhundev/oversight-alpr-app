@@ -9,14 +9,14 @@ This script trains YOLOv11 models with full MLflow integration for:
 
 Usage:
     # Train plate detector
-    python scripts/train_with_mlflow.py \
+    python scripts/training/train_with_mlflow.py \
         --data plates.yaml \
         --model yolo11n.pt \
         --epochs 100 \
         --name plate-detector
 
     # Train vehicle detector (fine-tune)
-    python scripts/train_with_mlflow.py \
+    python scripts/training/train_with_mlflow.py \
         --data vehicles.yaml \
         --model yolo11n.pt \
         --epochs 50 \

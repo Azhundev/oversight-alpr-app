@@ -27,7 +27,7 @@ docker logs -f alpr-mlflow
 
 ```bash
 # Register current YOLO models to MLflow
-python scripts/register_existing_models.py
+python scripts/mlflow/register_existing_models.py
 ```
 
 ### 3. Access MLflow UI
@@ -120,14 +120,14 @@ None → Staging → Production → Archived
 
 ```bash
 # Train plate detector with MLflow tracking
-python scripts/train_with_mlflow.py \
+python scripts/training/train_with_mlflow.py \
     --data plates.yaml \
     --model yolo11n.pt \
     --epochs 100 \
     --name plate-detector
 
 # Train and register to model registry
-python scripts/train_with_mlflow.py \
+python scripts/training/train_with_mlflow.py \
     --data plates.yaml \
     --epochs 100 \
     --name plate-detector \
@@ -223,7 +223,7 @@ print(f"Version: {metadata.get('version', 'N/A')}")
 
 ```bash
 # After training completes
-python scripts/train_with_mlflow.py \
+python scripts/training/train_with_mlflow.py \
     --data plates.yaml \
     --epochs 100 \
     --register \

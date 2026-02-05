@@ -41,7 +41,7 @@ All integration tests passed successfully:
 
 ### 4. **Docker Kafka Setup**
 - ✅ `docker-compose.yml` - Full stack (Zookeeper + Kafka + UI)
-- ✅ `scripts/setup_kafka.sh` - Automated setup
+- ✅ `scripts/kafka/setup_kafka.sh` - Automated setup
 - ✅ Kafka UI at `http://localhost:8080`
 - ✅ Topics: `alpr.events.plates`, `alpr.vehicles.tracked`, `alpr.system.health`
 
@@ -69,7 +69,7 @@ Output:
 
 ```bash
 # Start Kafka (takes 1-2 minutes on Jetson)
-bash scripts/setup_kafka.sh
+bash scripts/kafka/setup_kafka.sh
 
 # Run pilot.py (automatically connects)
 python3 pilot.py
@@ -141,7 +141,7 @@ open http://localhost:8080
 ```
 ✅ pilot.py                          # Modified - Integrated Kafka
 ✅ docker-compose.yml                # New - Kafka stack
-✅ scripts/setup_kafka.sh            # New - Setup script
+✅ scripts/kafka/setup_kafka.sh            # New - Setup script
 ✅ test_pilot_kafka.py               # New - Integration test
 ✅ services/__init__.py              # New - Package init
 ✅ services/event_processor/         # Renamed from event-processor

@@ -6,7 +6,7 @@ This script registers all ALPR event schemas with the Schema Registry.
 Run this after starting the Schema Registry service.
 
 Usage:
-    python scripts/register_schemas.py
+    python scripts/kafka/register_schemas.py
 """
 
 import json

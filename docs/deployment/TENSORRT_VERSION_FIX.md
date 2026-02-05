@@ -88,7 +88,7 @@ If you ever need to manually rebuild engines:
 ### Option 1: Use the Helper Script (Recommended)
 ```bash
 cd /home/jetson/OVR-ALPR
-./scripts/rebuild_tensorrt_engines.sh
+./scripts/tensorrt/rebuild_tensorrt_engines.sh
 ```
 
 ### Option 2: Manual Commands
@@ -144,7 +144,7 @@ python3 pilot.py 2>&1 | grep "SUCCESS"
 |------|---------|-------|
 | `detector_service.py` | Added TensorRT version checking | 6-15, 87-131, 167-180 |
 | `pilot.py` | Removed duplicate `import os` | 251 |
-| `scripts/rebuild_tensorrt_engines.sh` | New helper script | All (new file) |
+| `scripts/tensorrt/rebuild_tensorrt_engines.sh` | New helper script | All (new file) |
 
 ---
 
@@ -194,7 +194,7 @@ python3 pilot.py 2>&1 | grep "SUCCESS"
 ## Troubleshooting
 
 **Problem:** Engines still fail to load
-**Solution:** Run manual rebuild script: `./scripts/rebuild_tensorrt_engines.sh`
+**Solution:** Run manual rebuild script: `./scripts/tensorrt/rebuild_tensorrt_engines.sh`
 
 **Problem:** Version mismatch every restart
 **Solution:** Check if version files exist: `ls models/*.version`

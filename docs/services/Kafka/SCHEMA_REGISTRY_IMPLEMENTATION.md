@@ -135,7 +135,7 @@ curl http://localhost:8081/subjects
 
 **Registration:**
 ```bash
-python scripts/register_schemas.py
+python scripts/kafka/register_schemas.py
 ```
 
 **Result:**
@@ -205,7 +205,7 @@ Will use `AvroDeserializer` from confluent-kafka to automatically deserialize Av
 
 **Automated (Recommended):**
 ```bash
-python scripts/register_schemas.py
+python scripts/kafka/register_schemas.py
 ```
 
 **Manual (curl):**
@@ -323,7 +323,7 @@ curl -X PUT http://localhost:8081/config/alpr.events.plates-value \
 
 **Register New Version:**
 1. Update `schemas/plate_event.avsc`
-2. Run `python scripts/register_schemas.py`
+2. Run `python scripts/kafka/register_schemas.py`
 3. Schema Registry validates compatibility
 4. If valid, assigns version 2
 5. Old consumers can still read new data (ignore new field)
@@ -466,7 +466,7 @@ During migration, support both JSON and Avro:
 2. **schemas/plate_event.avsc**
    - Avro schema definition for PlateEvent
 
-3. **scripts/register_schemas.py**
+3. **scripts/kafka/register_schemas.py**
    - Schema registration automation
 
 4. **services/event_processor/avro_kafka_publisher.py**
