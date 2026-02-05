@@ -2,6 +2,26 @@
 
 Complete reference of all ports used by the ALPR pipeline components.
 
+> **Last Updated:** 2026-02-04 | **Services:** 25 Docker containers
+
+---
+
+## Quick Access
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| **Query API Docs** | http://localhost:8000/docs | - |
+| **Service Manager** | http://localhost:8000/services/dashboard | - |
+| **Grafana** | http://localhost:3000 | admin / alpr_admin_2024 |
+| **MLflow** | http://localhost:5000 | - |
+| **Kafka UI** | http://localhost:8080 | - |
+| **MinIO Console** | http://localhost:9001 | alpr_minio / alpr_minio_secure_pass_2024 |
+| **Metabase** | http://localhost:3001 | admin@alpr.local / alpr_secure_pass26 |
+| **Prometheus** | http://localhost:9090 | - |
+| **OpenSearch** | http://localhost:9200 | - |
+
+---
+
 ## Port Allocation Table
 
 | Service | Internal Port | External Port | Protocol | Purpose | URL |
@@ -125,7 +145,11 @@ Query API:          http://localhost:8000
   API Docs:         http://localhost:8000/docs
   SQL Queries:      http://localhost:8000/events/*
   Search Queries:   http://localhost:8000/search/*
-  Service Manager:  http://localhost:8000/services/dashboard
+
+Service Manager:    http://localhost:8000/services/dashboard
+  Start/Stop:       Start and stop services by group
+  RAM Monitor:      Track memory usage per service group
+  (Requires query-api running)
 ```
 
 #### Monitoring & Observability
@@ -468,6 +492,9 @@ Then run: `alpr-ports`
 
 ## Related Documentation
 
-- [Monitoring Stack Setup](../Services/monitoring-stack-setup.md)
-- [Grafana Dashboards Guide](../Services/grafana-dashboards.md)
+- [Monitoring Stack Setup](../services/Monitoring/monitoring-stack-setup.md)
+- [Grafana Dashboards Guide](../services/Monitoring/grafana-dashboards.md)
+- [Kafka Setup](../services/Kafka/kafka-setup.md)
+- [OpenSearch Integration](../services/Search/OpenSearch_Integration.md)
+- [MLflow Model Registry](../services/MLFlow/mlflow-model-registry.md)
 - [Docker Compose Configuration](../../docker-compose.yml)
