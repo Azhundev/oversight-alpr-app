@@ -49,6 +49,7 @@ python3 pilot.py --help
 - **MinIO Console:** http://localhost:9001 (object storage)
 - **Database:** `localhost:5432` (TimescaleDB)
 - **MLflow:** http://localhost:5000 (Model Registry & Experiments)
+- **Tempo:** http://localhost:3200 (Distributed Tracing)
 
 ---
 
@@ -86,7 +87,7 @@ python3 pilot.py --help
                  │
                  ▼
 ┌─────────────────────────────────────────────────────┐
-│    BACKEND (Docker - 35 Services)                   │
+│    BACKEND (Docker - 36 Services)                   │
 │                                                      │
 │  Kafka → [Storage Consumer → TimescaleDB]           │
 │       ↓  [Elasticsearch Consumer → OpenSearch]      │
@@ -99,6 +100,7 @@ python3 pilot.py --help
 │  Monitoring: [Prometheus → Grafana Dashboards]      │
 │  Analytics:  [Metabase BI → Executive Reports]      │
 │  Logging:    [Promtail → Loki]                      │
+│  Tracing:    [OpenTelemetry → Tempo]                │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -161,6 +163,7 @@ python3 pilot.py --help
 | **Object Storage** | MinIO | S3-compatible image storage |
 | **API** | FastAPI | REST endpoints |
 | **Monitoring** | Prometheus + Grafana + Loki | Metrics and logs |
+| **Tracing** | Tempo + OpenTelemetry | Distributed tracing |
 | **Analytics** | Metabase | Business intelligence & reports |
 | **Alerting** | Alert Engine | Multi-channel notifications |
 | **MLOps** | MLflow 2.9.2 | Model registry & experiment tracking |
@@ -182,14 +185,14 @@ OVR-ALPR/
 │   ├── tracking.yaml          # ByteTrack parameters
 │   └── ocr.yaml               # PaddleOCR settings
 │
-├── edge-services/             # Edge device services (Jetson)
+├── edge_services/             # Edge device services (Jetson)
 │   ├── camera/                # Video ingestion
 │   ├── detector/              # YOLO detection
 │   ├── tracker/               # ByteTrack tracking
 │   ├── ocr/                   # PaddleOCR service
 │   └── event_processor/       # Event validation & publishing
 │
-├── core-services/             # Backend services (Docker)
+├── core_services/             # Backend services (Docker)
 │   ├── storage/               # Kafka → TimescaleDB consumer
 │   ├── api/                   # Query API (FastAPI)
 │   ├── alerting/              # Alert Engine (notifications)
@@ -217,7 +220,7 @@ OVR-ALPR/
 - **[Port Reference](docs/alpr/port-reference.md)** - All service ports and URLs
 
 ### Architecture & Design
-- **[Services Overview](docs/alpr/services-overview.md)** - All 35+ services documented
+- **[Services Overview](docs/alpr/services-overview.md)** - All 36 services documented
 - **[Architecture Chart](docs/alpr/project-architecture-chart.md)** - Mermaid architecture diagrams
 - **[Storage Layer](docs/storage-layer.md)** - TimescaleDB schema and queries
 
@@ -297,13 +300,14 @@ KAFKA_TOPIC=alpr.plates.detected
 | SQL Database | ✅ Complete | TimescaleDB with hypertables |
 | Search Engine | ✅ Complete | OpenSearch with full-text search |
 | Query API | ✅ Complete | FastAPI with SQL + search endpoints |
-| Docker Deployment | ✅ Complete | 35 services containerized |
+| Docker Deployment | ✅ Complete | 36 services containerized |
 | Object Storage | ✅ Complete | MinIO with async uploads |
 | Monitoring Stack | ✅ Complete | Prometheus + Grafana + Loki |
 | Business Intelligence | ✅ Complete | Metabase analytics & reports |
 | Alert Engine | ✅ Complete | Multi-channel notifications + DLQ |
 | Error Handling | ✅ Complete | Dead Letter Queue + retry logic |
 | MLOps | ✅ Complete | MLflow model registry & training |
+| Distributed Tracing | ✅ Complete | Tempo + OpenTelemetry in Query API |
 
 **Overall:** 98% complete - Enterprise-grade ALPR system ready for production
 
@@ -338,11 +342,11 @@ KAFKA_TOPIC=alpr.plates.detected
 - ✅ Model versioning with stages
 - ✅ Experiment tracking
 - ✅ Training pipeline (train_with_mlflow.py)
+- ✅ Distributed tracing (Tempo + OpenTelemetry)
 
 ### Phase 7: Advanced Optimization (Optional)
 - Automated retraining pipeline (TAO Toolkit)
 - A/B testing framework
-- Distributed tracing (Tempo)
 
 **See:** [docs/alpr/next-steps.md](docs/alpr/next-steps.md)
 
@@ -517,7 +521,7 @@ Proprietary - Enterprise Use Only
 
 - **Project Lead:** Azhundev
 - **AI Assistant:** Claude Code (Anthropic)
-- **Documentation:** Last updated 2026-02-02
+- **Documentation:** Last updated 2026-02-03
 
 ---
 

@@ -35,7 +35,7 @@ Successfully enabled GPU hardware video decoding by rebuilding OpenCV 4.6.0 with
 ### Phase 1: Code Implementation
 **Status:** ✅ Complete
 
-Implemented all required code changes in `edge-services/camera/camera_ingestion.py`:
+Implemented all required code changes in `edge_services/camera/camera_ingestion.py`:
 
 1. **Codec Detection (Lines 139-171)**
    - Added `_detect_codec()` method
@@ -162,7 +162,7 @@ After extensive testing, implemented a hybrid approach:
 
 ### Code Implementation
 
-**File:** `edge-services/camera/camera_ingestion.py`
+**File:** `edge_services/camera/camera_ingestion.py`
 
 ```python
 # Line 437 - RTSP streams use hardware decode
@@ -226,7 +226,7 @@ ffmpeg -i videos/training/IMG_6941.MOV \
 - `opencv_install.log` - Installation output (38K)
 
 ### Code Changes
-**File:** `edge-services/camera/camera_ingestion.py`
+**File:** `edge_services/camera/camera_ingestion.py`
 - Line 139-171: `_detect_codec()` method
 - Line 173-232: `_build_gstreamer_pipeline()` with H.265 support
 - Line 94-113: Hardware decode initialization with logging
@@ -420,7 +420,7 @@ python3 pilot.py 2>&1 | grep -E "Hardware decoder|Camera initialized"
 ## References
 
 - **Original optimization guide:** `docs/Optimizations/gpu-video-decode-optimization.md`
-- **Code implementation:** `edge-services/camera/camera_ingestion.py:94-232`
+- **Code implementation:** `edge_services/camera/camera_ingestion.py:94-232`
 - **Configuration:** `config/cameras.yaml`
 - **Build script:** `scripts/build_opencv_gstreamer.sh`
 - **Build logs:** `logs/opencv_*.log`

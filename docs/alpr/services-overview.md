@@ -41,7 +41,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 ## System Summary
 
-**Total Services**: 18 core services + 8 infrastructure services + 9 monitoring/analytics services = **35 services total**
+**Total Services**: 18 core services + 8 infrastructure services + 10 monitoring/analytics services = **36 services total**
 
 **Edge Processing** (pilot.py):
 1. Camera Ingestion Service
@@ -80,13 +80,12 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 - Grafana (metrics visualization and dashboards)
 - Metabase (business intelligence and analytics)
 - Loki (log aggregation)
+- Tempo (distributed tracing - Ports 3200, 4317, 4318)
 - Promtail (log shipping agent)
 - cAdvisor (container resource metrics)
 - Node Exporter (host system metrics - Port 9100)
 - Postgres Exporter (TimescaleDB metrics - Port 9187)
 - Kafka Exporter (Kafka broker metrics - Port 9308)
-- Promtail (log shipping)
-- cAdvisor (container resource metrics)
 
 **Key Features**:
 - Real-time plate detection and recognition
@@ -112,7 +111,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 - **Storage**: TimescaleDB (PostgreSQL 16 + TimescaleDB), OpenSearch 2.11.0, MinIO (S3-compatible)
 - **API**: FastAPI, Uvicorn, Pydantic
 - **Search**: OpenSearch 2.11.0 (Elasticsearch-compatible)
-- **Monitoring**: Prometheus, Grafana, Loki, cAdvisor
+- **Monitoring**: Prometheus, Grafana, Loki, Tempo, cAdvisor
 - **Deployment**: Docker Compose
 - **Hardware**: NVIDIA Jetson (Orin NX/AGX) with CUDA support
 
@@ -1047,7 +1046,7 @@ minio:
 
 ### 12. Alert Engine Service
 
-**Location**: `core-services/alerting/alert_engine.py`
+**Location**: `core_services/alerting/alert_engine.py`
 
 **Purpose**: Real-time rule-based notification engine that consumes plate detection events and triggers alerts via multiple channels (Email, Slack, Webhook, SMS)
 
@@ -1145,7 +1144,7 @@ alpr_rule_evaluation_duration_seconds
 
 **Usage Example**:
 ```python
-from core-services.alerting.alert_engine import AlertEngine
+from core_services.alerting.alert_engine import AlertEngine
 
 engine = AlertEngine(
     kafka_bootstrap_servers="localhost:9092",
@@ -1326,7 +1325,7 @@ TWILIO_AUTH_TOKEN=your_twilio_auth_token
 - Port: 9090
 - Scrape interval: 5-30s depending on target
 - Container: `alpr-prometheus`
-- Config: `core-services/monitoring/prometheus/prometheus.yml`
+- Config: `core_services/monitoring/prometheus/prometheus.yml`
 
 **Key Features**:
 - Scrapes metrics from all ALPR services
@@ -1367,7 +1366,7 @@ TWILIO_AUTH_TOKEN=your_twilio_auth_token
 - Log aggregation system
 - Port: 3100
 - Container: `alpr-loki`
-- Config: `core-services/monitoring/loki/loki-config.yaml`
+- Config: `core_services/monitoring/loki/loki-config.yaml`
 
 **Key Features**:
 - Lightweight log aggregation
@@ -1380,7 +1379,7 @@ TWILIO_AUTH_TOKEN=your_twilio_auth_token
 - Log shipping agent
 - Port: 9080 (internal)
 - Container: `alpr-promtail`
-- Config: `core-services/monitoring/promtail/promtail-config.yaml`
+- Config: `core_services/monitoring/promtail/promtail-config.yaml`
 
 **Key Features**:
 - Ships logs from Docker containers to Loki
@@ -1399,11 +1398,33 @@ TWILIO_AUTH_TOKEN=your_twilio_auth_token
 - Historical resource usage
 - Prometheus metrics export
 
+**Tempo** (`grafana/tempo:latest`)
+- Distributed tracing backend
+- Ports: 3200 (API), 4317 (OTLP gRPC), 4318 (OTLP HTTP)
+- Container: `alpr-tempo`
+- Config: `core_services/monitoring/tempo/tempo-config.yaml`
+
+**Key Features**:
+- OpenTelemetry (OTLP) protocol support
+- OTLP gRPC and HTTP receivers for trace ingestion
+- Local storage backend for traces
+- Integration with Grafana for trace visualization
+- Trace-to-log correlation with Loki (via trace_id)
+- Trace-to-metrics correlation with Prometheus
+- Node graph visualization for service dependencies
+
+**OpenTelemetry Integration**:
+- Query API instrumented with OpenTelemetry SDK
+- FastAPI automatic instrumentation
+- Traces exported via OTLP gRPC to Tempo
+- Environment variables: `TEMPO_ENDPOINT`, `ENABLE_TRACING`
+
 **Access URLs**:
 - Grafana: http://localhost:3000
 - Metabase: http://localhost:3001
 - Prometheus: http://localhost:9090
 - Loki: http://localhost:3100 (API only)
+- Tempo: http://localhost:3200
 - cAdvisor: http://localhost:8082
 
 ### Docker Compose Stack
@@ -1834,7 +1855,7 @@ SELECT * FROM plate_events_stats;
 
 ## 10. Elasticsearch Consumer Service
 
-**File**: `core-services/search/elasticsearch_consumer.py`
+**File**: `core_services/search/elasticsearch_consumer.py`
 **Container**: `alpr-elasticsearch-consumer`
 **Port**: `8004` (Prometheus metrics)
 **Dependencies**: Kafka, Schema Registry, OpenSearch
@@ -1879,7 +1900,7 @@ kafka:
 elasticsearch-consumer:
   build:
     context: .
-    dockerfile: core-services/search/Dockerfile
+    dockerfile: core_services/search/Dockerfile
   container_name: alpr-elasticsearch-consumer
   depends_on:
     kafka:

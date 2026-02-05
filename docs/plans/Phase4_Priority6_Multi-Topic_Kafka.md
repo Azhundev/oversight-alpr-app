@@ -193,7 +193,7 @@ Already well-designed with all required fields.
 
 ### 3.1 Multi-Topic Publisher
 
-**File**: `/home/jetson/OVR-ALPR/edge-services/event_processor/multi_topic_publisher.py` (NEW)
+**File**: `/home/jetson/OVR-ALPR/edge_services/event_processor/multi_topic_publisher.py` (NEW)
 
 Implement `MultiTopicAvroPublisher` class with:
 - Topic routing based on event type
@@ -223,7 +223,7 @@ During migration, support dual-publishing to both old and new topics.
 
 ### 4.1 Storage Consumer
 
-**File**: `/home/jetson/OVR-ALPR/core-services/storage/avro_kafka_consumer.py` (MODIFY)
+**File**: `/home/jetson/OVR-ALPR/core_services/storage/avro_kafka_consumer.py` (MODIFY)
 
 **Changes**:
 1. Subscribe to `alpr.events.plates` (update from `alpr.plates.detected`)
@@ -240,7 +240,7 @@ During migration, support dual-publishing to both old and new topics.
 
 ### 4.2 Alert Engine
 
-**File**: `/home/jetson/OVR-ALPR/core-services/alerting/alert_engine.py` (MODIFY)
+**File**: `/home/jetson/OVR-ALPR/core_services/alerting/alert_engine.py` (MODIFY)
 
 **Changes**:
 - Update topic: `alpr.events.plates`
@@ -249,7 +249,7 @@ During migration, support dual-publishing to both old and new topics.
 
 ### 4.3 Elasticsearch Consumer
 
-**File**: `/home/jetson/OVR-ALPR/core-services/search/elasticsearch_consumer.py` (MODIFY)
+**File**: `/home/jetson/OVR-ALPR/core_services/search/elasticsearch_consumer.py` (MODIFY)
 
 **Changes**:
 - Update topic: `alpr.events.plates`
@@ -263,7 +263,7 @@ During migration, support dual-publishing to both old and new topics.
 
 ### 5.1 DLQ Consumer
 
-**File**: `/home/jetson/OVR-ALPR/core-services/dlq/dlq_consumer.py` (NEW)
+**File**: `/home/jetson/OVR-ALPR/core_services/dlq/dlq_consumer.py` (NEW)
 
 **Purpose**: Monitor DLQ topic, log failures, expose metrics
 
@@ -279,7 +279,7 @@ During migration, support dual-publishing to both old and new topics.
 
 ### 5.2 Metrics Consumer (Optional)
 
-**File**: `/home/jetson/OVR-ALPR/core-services/metrics/metrics_consumer.py` (NEW)
+**File**: `/home/jetson/OVR-ALPR/core_services/metrics/metrics_consumer.py` (NEW)
 
 **Purpose**: Consume system metrics from Kafka and expose for Prometheus
 
@@ -290,7 +290,7 @@ During migration, support dual-publishing to both old and new topics.
 
 ### 5.3 Metrics Publisher (Optional)
 
-**File**: `/home/jetson/OVR-ALPR/edge-services/event_processor/metrics_publisher.py` (NEW)
+**File**: `/home/jetson/OVR-ALPR/edge_services/event_processor/metrics_publisher.py` (NEW)
 
 **Purpose**: Publish system metrics to Kafka
 
@@ -432,7 +432,7 @@ During migration, support dual-publishing to both old and new topics.
   dlq-consumer:
     build:
       context: .
-      dockerfile: core-services/dlq/Dockerfile
+      dockerfile: core_services/dlq/Dockerfile
     container_name: alpr-dlq-consumer
     depends_on:
       - kafka
@@ -451,7 +451,7 @@ During migration, support dual-publishing to both old and new topics.
   metrics-consumer:
     build:
       context: .
-      dockerfile: core-services/metrics/Dockerfile
+      dockerfile: core_services/metrics/Dockerfile
     container_name: alpr-metrics-consumer
     depends_on:
       - kafka
@@ -489,22 +489,22 @@ elasticsearch-consumer:
 ## 10. CRITICAL FILES FOR IMPLEMENTATION
 
 **Priority: HIGH**
-1. `/home/jetson/OVR-ALPR/edge-services/event_processor/multi_topic_publisher.py` (NEW)
+1. `/home/jetson/OVR-ALPR/edge_services/event_processor/multi_topic_publisher.py` (NEW)
 2. `/home/jetson/OVR-ALPR/schemas/vehicle_event.avsc` (NEW)
 3. `/home/jetson/OVR-ALPR/schemas/metric_event.avsc` (NEW)
 4. `/home/jetson/OVR-ALPR/schemas/dlq_message.avsc` (NEW)
-5. `/home/jetson/OVR-ALPR/core-services/storage/avro_kafka_consumer.py` (MODIFY)
-6. `/home/jetson/OVR-ALPR/core-services/dlq/dlq_consumer.py` (NEW)
+5. `/home/jetson/OVR-ALPR/core_services/storage/avro_kafka_consumer.py` (MODIFY)
+6. `/home/jetson/OVR-ALPR/core_services/dlq/dlq_consumer.py` (NEW)
 7. `/home/jetson/OVR-ALPR/pilot.py` (MODIFY - lines 196-216)
 
 **Priority: MEDIUM**
 8. `/home/jetson/OVR-ALPR/docker-compose.yml` (MODIFY)
-9. `/home/jetson/OVR-ALPR/core-services/alerting/alert_engine.py` (MODIFY)
-10. `/home/jetson/OVR-ALPR/core-services/search/elasticsearch_consumer.py` (MODIFY)
+9. `/home/jetson/OVR-ALPR/core_services/alerting/alert_engine.py` (MODIFY)
+10. `/home/jetson/OVR-ALPR/core_services/search/elasticsearch_consumer.py` (MODIFY)
 
 **Priority: LOW (Optional)**
-11. `/home/jetson/OVR-ALPR/core-services/metrics/metrics_consumer.py` (NEW)
-12. `/home/jetson/OVR-ALPR/edge-services/event_processor/metrics_publisher.py` (NEW)
+11. `/home/jetson/OVR-ALPR/core_services/metrics/metrics_consumer.py` (NEW)
+12. `/home/jetson/OVR-ALPR/edge_services/event_processor/metrics_publisher.py` (NEW)
 
 ---
 

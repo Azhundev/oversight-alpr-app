@@ -4,7 +4,7 @@
 Implement a production-ready Alert Engine that consumes plate detection events from Kafka and sends notifications via Email, Slack, Webhooks, and SMS based on configurable rules.
 
 ## Architecture Decision
-- **Location**: `/home/jetson/OVR-ALPR/core-services/alerting/` (Docker service, follows kafka-consumer pattern)
+- **Location**: `/home/jetson/OVR-ALPR/core_services/alerting/` (Docker service, follows kafka-consumer pattern)
 - **Pattern**: Based on `avro_kafka_consumer.py` - same Kafka consumer structure
 - **Port**: 8003 for Prometheus metrics (8001=pilot, 8002=kafka-consumer)
 - **Configuration**: `/home/jetson/OVR-ALPR/config/alert_rules.yaml`
@@ -12,7 +12,7 @@ Implement a production-ready Alert Engine that consumes plate detection events f
 ## Core Components
 
 ### 1. Alert Engine (Main Kafka Consumer)
-**File**: `core-services/alerting/alert_engine.py`
+**File**: `core_services/alerting/alert_engine.py`
 
 **Responsibilities**:
 - Subscribe to `alpr.plates.detected` topic with Avro deserialization
@@ -28,7 +28,7 @@ Implement a production-ready Alert Engine that consumes plate detection events f
 - Same statistics tracking dict
 
 ### 2. Rule Engine (Rule Matching Logic)
-**File**: `core-services/alerting/rule_engine.py`
+**File**: `core_services/alerting/rule_engine.py`
 
 **Responsibilities**:
 - Load rules from `config/alert_rules.yaml`
@@ -53,7 +53,7 @@ class MatchedRule:
 ```
 
 ### 3. Notification System
-**Files**: `core-services/alerting/notifiers/`
+**Files**: `core_services/alerting/notifiers/`
 
 **Base Class**: `notifiers/base.py`
 ```python
@@ -70,7 +70,7 @@ class BaseNotifier(ABC):
 - `sms_notifier.py` - Use Twilio API for SMS
 
 ### 4. Rate Limiting
-**File**: `core-services/alerting/utils/rate_limiter.py`
+**File**: `core_services/alerting/utils/rate_limiter.py`
 
 **Responsibilities**:
 - Prevent alert spam with configurable cooldown periods
@@ -84,7 +84,7 @@ class RateLimiter:
 ```
 
 ### 5. Retry Handler
-**File**: `core-services/alerting/utils/retry_handler.py`
+**File**: `core_services/alerting/utils/retry_handler.py`
 
 **Responsibilities**:
 - Retry failed notifications with exponential backoff
@@ -154,15 +154,15 @@ rules:
 ## Docker Integration
 
 ### Dockerfile
-**File**: `core-services/alerting/Dockerfile`
+**File**: `core_services/alerting/Dockerfile`
 
 ```dockerfile
 FROM python:3.9-slim
 WORKDIR /app
 RUN apt-get update && apt-get install -y gcc libffi-dev libssl-dev && rm -rf /var/lib/apt/lists/*
-COPY core-services/alerting/requirements.txt .
+COPY core_services/alerting/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY core-services/alerting/ ./services/alerting/
+COPY core_services/alerting/ ./services/alerting/
 COPY schemas/ ./schemas/
 ENV PYTHONPATH=/app
 EXPOSE 8003
@@ -170,7 +170,7 @@ CMD ["python", "-u", "services/alerting/alert_engine.py"]
 ```
 
 ### requirements.txt
-**File**: `core-services/alerting/requirements.txt`
+**File**: `core_services/alerting/requirements.txt`
 
 ```
 confluent-kafka[avro]>=2.12.0
@@ -188,7 +188,7 @@ twilio>=8.10.0
   alert-engine:
     build:
       context: .
-      dockerfile: core-services/alerting/Dockerfile
+      dockerfile: core_services/alerting/Dockerfile
     container_name: alpr-alert-engine
     depends_on:
       kafka:
@@ -236,7 +236,7 @@ metrics_notifications_failed = Counter('alert_engine_notifications_failed_total'
 metrics_notification_send_time = Histogram('alert_engine_notification_send_time_seconds', 'Notification send time', ['channel'])
 ```
 
-Update `core-services/monitoring/prometheus/prometheus.yml`:
+Update `core_services/monitoring/prometheus/prometheus.yml`:
 ```yaml
 - job_name: 'alert-engine'
   static_configs:
@@ -247,7 +247,7 @@ Update `core-services/monitoring/prometheus/prometheus.yml`:
 ## Implementation Steps (7-Day Plan)
 
 ### Day 1-2: Foundation
-1. Create directory structure: `core-services/alerting/`, `notifiers/`, `utils/`
+1. Create directory structure: `core_services/alerting/`, `notifiers/`, `utils/`
 2. Implement `rule_engine.py` with condition operators
 3. Create `config/alert_rules.yaml` with 3 sample rules
 4. Write unit tests for rule evaluation
@@ -293,23 +293,23 @@ Update `core-services/monitoring/prometheus/prometheus.yml`:
 ## Critical Files Reference
 
 **Existing files to reference**:
-- `/home/jetson/OVR-ALPR/core-services/storage/avro_kafka_consumer.py` - Main pattern
+- `/home/jetson/OVR-ALPR/core_services/storage/avro_kafka_consumer.py` - Main pattern
 - `/home/jetson/OVR-ALPR/schemas/plate_event.avsc` - Event structure
 - `/home/jetson/OVR-ALPR/config/cameras.yaml` - Config pattern
 - `/home/jetson/OVR-ALPR/docker-compose.yml` - Service definition
 
 **New files to create**:
-- `/home/jetson/OVR-ALPR/core-services/alerting/alert_engine.py`
-- `/home/jetson/OVR-ALPR/core-services/alerting/rule_engine.py`
-- `/home/jetson/OVR-ALPR/core-services/alerting/notifiers/base.py`
-- `/home/jetson/OVR-ALPR/core-services/alerting/notifiers/email_notifier.py`
-- `/home/jetson/OVR-ALPR/core-services/alerting/notifiers/slack_notifier.py`
-- `/home/jetson/OVR-ALPR/core-services/alerting/notifiers/webhook_notifier.py`
-- `/home/jetson/OVR-ALPR/core-services/alerting/notifiers/sms_notifier.py`
-- `/home/jetson/OVR-ALPR/core-services/alerting/utils/rate_limiter.py`
-- `/home/jetson/OVR-ALPR/core-services/alerting/utils/retry_handler.py`
-- `/home/jetson/OVR-ALPR/core-services/alerting/Dockerfile`
-- `/home/jetson/OVR-ALPR/core-services/alerting/requirements.txt`
+- `/home/jetson/OVR-ALPR/core_services/alerting/alert_engine.py`
+- `/home/jetson/OVR-ALPR/core_services/alerting/rule_engine.py`
+- `/home/jetson/OVR-ALPR/core_services/alerting/notifiers/base.py`
+- `/home/jetson/OVR-ALPR/core_services/alerting/notifiers/email_notifier.py`
+- `/home/jetson/OVR-ALPR/core_services/alerting/notifiers/slack_notifier.py`
+- `/home/jetson/OVR-ALPR/core_services/alerting/notifiers/webhook_notifier.py`
+- `/home/jetson/OVR-ALPR/core_services/alerting/notifiers/sms_notifier.py`
+- `/home/jetson/OVR-ALPR/core_services/alerting/utils/rate_limiter.py`
+- `/home/jetson/OVR-ALPR/core_services/alerting/utils/retry_handler.py`
+- `/home/jetson/OVR-ALPR/core_services/alerting/Dockerfile`
+- `/home/jetson/OVR-ALPR/core_services/alerting/requirements.txt`
 - `/home/jetson/OVR-ALPR/config/alert_rules.yaml`
 - `/home/jetson/OVR-ALPR/docs/Services/alert-engine.md`
 

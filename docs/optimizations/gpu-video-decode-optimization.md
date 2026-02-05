@@ -15,7 +15,7 @@
 The system **already has** hardware decoding implemented via GStreamer:
 
 ```python
-# edge-services/camera/camera_ingestion.py:130-151
+# edge_services/camera/camera_ingestion.py:130-151
 def _build_gstreamer_pipeline(self, rtsp_url: str) -> str:
     pipeline = (
         f"rtspsrc location={rtsp_url} latency=0 ! "
@@ -367,7 +367,7 @@ The codebase already has an alternative GPU-accelerated implementation:
 
 ```bash
 # Check if it exists
-ls -lh edge-services/camera/gpu_camera_ingestion.py
+ls -lh edge_services/camera/gpu_camera_ingestion.py
 ```
 
 If it exists, you can:
@@ -506,7 +506,7 @@ gst-launch-1.0 filesrc location=test.mp4 ! qtdemux ! h264parse ! nvv4l2decoder !
 
 ## 📝 Code Changes Summary
 
-### File: `edge-services/camera/camera_ingestion.py`
+### File: `edge_services/camera/camera_ingestion.py`
 
 **Line 130-151:** Update `_build_gstreamer_pipeline()`
 ```python

@@ -30,13 +30,13 @@ OVR-ALPR/
 
 NEW STRUCTURE:
 OVR-ALPR/
-├── edge-services/       ✨ NEW
+├── edge_services/       ✨ NEW
 │   ├── camera/
 │   ├── detector/
 │   ├── ocr/
 │   ├── tracker/
 │   └── event_processor/
-└── core-services/       ✨ NEW
+└── core_services/       ✨ NEW
     ├── storage/
     ├── api/
     └── monitoring/      📦 MOVED
@@ -53,14 +53,14 @@ OVR-ALPR/
 
 | Old Path | New Path | Type |
 |----------|----------|------|
-| `/services/camera/` | `/edge-services/camera/` | Edge |
-| `/services/detector/` | `/edge-services/detector/` | Edge |
-| `/services/ocr/` | `/edge-services/ocr/` | Edge |
-| `/services/tracker/` | `/edge-services/tracker/` | Edge |
-| `/services/event_processor/` | `/edge-services/event_processor/` | Edge |
-| `/services/storage/` | `/core-services/storage/` | Core |
-| `/services/api/` | `/core-services/api/` | Core |
-| `/monitoring/` | `/core-services/monitoring/` | Core |
+| `/services/camera/` | `/edge_services/camera/` | Edge |
+| `/services/detector/` | `/edge_services/detector/` | Edge |
+| `/services/ocr/` | `/edge_services/ocr/` | Edge |
+| `/services/tracker/` | `/edge_services/tracker/` | Edge |
+| `/services/event_processor/` | `/edge_services/event_processor/` | Edge |
+| `/services/storage/` | `/core_services/storage/` | Core |
+| `/services/api/` | `/core_services/api/` | Core |
+| `/monitoring/` | `/core_services/monitoring/` | Core |
 
 ### 2. Docker Compose Changes
 
@@ -75,7 +75,7 @@ kafka-consumer:
 # NEW
 kafka-consumer:
   build:
-    dockerfile: core-services/storage/Dockerfile
+    dockerfile: core_services/storage/Dockerfile
 ```
 
 **Updated Volume Mounts**:
@@ -87,14 +87,14 @@ volumes:
 
 # NEW
 volumes:
-  - ./core-services/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  - ./core_services/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
 ```
 
 ### 3. Documentation Updates
 
 New README files added:
-- ✅ `/edge-services/README.md` - Edge services guide
-- ✅ `/core-services/README.md` - Core services guide
+- ✅ `/edge_services/README.md` - Edge services guide
+- ✅ `/core_services/README.md` - Core services guide
 
 Updated documentation:
 - Port reference paths
@@ -143,8 +143,8 @@ MODEL_PATH = "services/detector/model.pt"
 
 **After**:
 ```python
-CONFIG_PATH = "edge-services/camera/config.yaml"
-MODEL_PATH = "edge-services/detector/model.pt"
+CONFIG_PATH = "edge_services/camera/config.yaml"
+MODEL_PATH = "edge_services/detector/model.pt"
 ```
 
 #### Custom Docker Builds
@@ -164,7 +164,7 @@ services:
 services:
   custom-service:
     build:
-      context: ./core-services/storage
+      context: ./core_services/storage
 ```
 
 ---
@@ -207,9 +207,9 @@ curl -s http://localhost:9090/-/healthy
 
 ```bash
 # Should exist
-ls edge-services/camera/
-ls core-services/storage/
-ls core-services/monitoring/
+ls edge_services/camera/
+ls core_services/storage/
+ls core_services/monitoring/
 
 # Should NOT exist
 ls services/ 2>/dev/null && echo "❌ Old services/ directory still exists!" || echo "✅ Clean migration"
@@ -228,8 +228,8 @@ ls services/ 2>/dev/null && echo "❌ Old services/ directory still exists!" || 
 
 | Directory | Deployment Target | Infrastructure |
 |-----------|------------------|----------------|
-| `edge-services/` | Jetson Orin NX | GPU, low latency |
-| `core-services/` | Docker / Cloud | Scalable, persistent |
+| `edge_services/` | Jetson Orin NX | GPU, low latency |
+| `core_services/` | Docker / Cloud | Scalable, persistent |
 
 ### 3. Easier Onboarding
 
@@ -254,14 +254,14 @@ If you need to rollback to the old structure:
 docker compose down
 
 # 2. Move services back
-mv edge-services/camera services/
-mv edge-services/detector services/
-mv edge-services/ocr services/
-mv edge-services/tracker services/
-mv edge-services/event_processor services/
-mv core-services/storage services/
-mv core-services/api services/
-mv core-services/monitoring ./monitoring
+mv edge_services/camera services/
+mv edge_services/detector services/
+mv edge_services/ocr services/
+mv edge_services/tracker services/
+mv edge_services/event_processor services/
+mv core_services/storage services/
+mv core_services/api services/
+mv core_services/monitoring ./monitoring
 
 # 3. Restore docker-compose.yml from git
 git checkout docker-compose.yml
@@ -305,7 +305,7 @@ ERROR: failed to solve: failed to read dockerfile: open services/storage/Dockerf
 services:
   kafka-consumer:
     build:
-      dockerfile: core-services/storage/Dockerfile  # Updated path
+      dockerfile: core_services/storage/Dockerfile  # Updated path
 ```
 
 ### Issue 3: Missing Configuration Files
@@ -315,14 +315,14 @@ services:
 FileNotFoundError: monitoring/prometheus/prometheus.yml not found
 ```
 
-**Fix**: Configuration files moved to `core-services/monitoring/`. Update any scripts:
+**Fix**: Configuration files moved to `core_services/monitoring/`. Update any scripts:
 
 ```bash
 # Change from
 PROM_CONFIG="monitoring/prometheus/prometheus.yml"
 
 # To
-PROM_CONFIG="core-services/monitoring/prometheus/prometheus.yml"
+PROM_CONFIG="core_services/monitoring/prometheus/prometheus.yml"
 ```
 
 ---
@@ -347,22 +347,22 @@ After migration, verify:
 ### Where should I put new services?
 
 **Edge service** (needs GPU, low latency, runs on Jetson):
-- Add to `edge-services/`
+- Add to `edge_services/`
 - Examples: camera processing, real-time detection, tracking
 
 **Core service** (needs persistence, can scale, runs in Docker):
-- Add to `core-services/`
+- Add to `core_services/`
 - Examples: data storage, APIs, analytics, monitoring
 
 **Infrastructure** (observability, networking):
-- Add to `core-services/monitoring/` if monitoring-related
+- Add to `core_services/monitoring/` if monitoring-related
 - Otherwise, create top-level directory (e.g., `/infrastructure`)
 
 ### Can I still use `/services` directory?
 
 No. The `/services` directory has been removed. All code moved to:
-- `edge-services/` - Edge device services
-- `core-services/` - Backend services
+- `edge_services/` - Edge device services
+- `core_services/` - Backend services
 
 ### Will this break my existing deployments?
 
@@ -379,8 +379,8 @@ Check the "Action Required for Developers" section above.
 
 ## Related Documentation
 
-- [Edge Services README](../edge-services/README.md)
-- [Core Services README](../core-services/README.md)
+- [Edge Services README](../edge_services/README.md)
+- [Core Services README](../core_services/README.md)
 - [Port Reference](alpr_pipeline/port-reference.md)
 - [Monitoring Stack Setup](Services/monitoring-stack-setup.md)
 

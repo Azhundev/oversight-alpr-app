@@ -100,7 +100,7 @@ opensearch-dashboards:
 elasticsearch-consumer:
   build:
     context: .
-    dockerfile: core-services/search/Dockerfile
+    dockerfile: core_services/search/Dockerfile
   container_name: alpr-elasticsearch-consumer
   depends_on:
     kafka:
@@ -150,7 +150,7 @@ volumes:
 
 ### Index Template
 
-**File:** `core-services/search/opensearch/templates/alpr-events-template.json`
+**File:** `core_services/search/opensearch/templates/alpr-events-template.json`
 
 ```json
 {
@@ -234,7 +234,7 @@ volumes:
 ### Directory Structure
 
 ```
-core-services/search/
+core_services/search/
 ├── Dockerfile
 ├── requirements.txt
 ├── elasticsearch_consumer.py  # Main consumer
@@ -263,7 +263,7 @@ core-services/search/
 
 ### Dockerfile
 
-**File:** `core-services/search/Dockerfile`
+**File:** `core_services/search/Dockerfile`
 
 ```dockerfile
 FROM python:3.9-slim
@@ -274,10 +274,10 @@ RUN apt-get update && \
     apt-get install -y gcc libffi-dev libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
-COPY core-services/search/requirements.txt /app/requirements.txt
+COPY core_services/search/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY core-services/search/ /app/services/search/
+COPY core_services/search/ /app/services/search/
 COPY schemas/ /app/schemas/
 
 RUN mkdir -p /app/logs
@@ -291,7 +291,7 @@ CMD ["python", "-u", "/app/services/search/elasticsearch_consumer.py"]
 
 ### Requirements
 
-**File:** `core-services/search/requirements.txt`
+**File:** `core_services/search/requirements.txt`
 
 ```
 opensearch-py>=2.4.0
@@ -336,7 +336,7 @@ elasticsearch_consumer_opensearch_available (gauge)
 
 ### New Endpoints
 
-Add to `core-services/api/query_api.py`:
+Add to `core_services/api/query_api.py`:
 
 1. **`GET /search/fulltext`** - Full-text search with fuzzy matching
    - Parameters: `q` (query), `start_time`, `end_time`, `camera_id`, `limit`, `offset`
@@ -486,7 +486,7 @@ kafka:
 
 ### Prometheus Integration
 
-**Add to:** `core-services/monitoring/prometheus/prometheus.yml`
+**Add to:** `core_services/monitoring/prometheus/prometheus.yml`
 
 ```yaml
 scrape_configs:
@@ -499,7 +499,7 @@ scrape_configs:
 
 ### Grafana Dashboard
 
-**Create:** `core-services/monitoring/grafana/dashboards/elasticsearch-search.json`
+**Create:** `core_services/monitoring/grafana/dashboards/elasticsearch-search.json`
 
 **Panels:**
 1. **Indexing Rate:** `rate(elasticsearch_consumer_messages_indexed_total[1m])`
@@ -525,14 +525,14 @@ scrape_configs:
 
 **Critical Files:**
 - `docker-compose.yml`
-- `core-services/search/opensearch/templates/alpr-events-template.json`
+- `core_services/search/opensearch/templates/alpr-events-template.json`
 
 ---
 
 ### Phase 2: Consumer Development (Days 3-5)
 
 **Tasks:**
-- [ ] Create directory structure: `core-services/search/`
+- [ ] Create directory structure: `core_services/search/`
 - [ ] Implement `elasticsearch_consumer.py` (follow `avro_kafka_consumer.py` pattern)
 - [ ] Implement `bulk_indexer.py` (adaptive batching logic)
 - [ ] Implement `opensearch_client.py` (connection wrapper)
@@ -542,14 +542,14 @@ scrape_configs:
 - [ ] Test locally with sample Kafka messages
 
 **Critical Files:**
-- `core-services/search/elasticsearch_consumer.py`
-- `core-services/search/bulk_indexer.py`
-- `core-services/search/Dockerfile`
-- `core-services/search/requirements.txt`
+- `core_services/search/elasticsearch_consumer.py`
+- `core_services/search/bulk_indexer.py`
+- `core_services/search/Dockerfile`
+- `core_services/search/requirements.txt`
 
 **References:**
-- `/home/jetson/OVR-ALPR/core-services/storage/avro_kafka_consumer.py` (Avro pattern)
-- `/home/jetson/OVR-ALPR/core-services/alerting/alert_engine.py` (consumer pattern)
+- `/home/jetson/OVR-ALPR/core_services/storage/avro_kafka_consumer.py` (Avro pattern)
+- `/home/jetson/OVR-ALPR/core_services/alerting/alert_engine.py` (consumer pattern)
 
 ---
 
@@ -587,9 +587,9 @@ scrape_configs:
 - [ ] Rebuild and restart Query API container
 
 **Critical Files:**
-- `core-services/api/query_api.py`
-- `core-services/api/requirements.txt`
-- `core-services/api/Dockerfile`
+- `core_services/api/query_api.py`
+- `core_services/api/requirements.txt`
+- `core_services/api/Dockerfile`
 
 **Example Test:**
 ```bash
@@ -618,8 +618,8 @@ curl "http://localhost:8000/search/analytics?metric=plates_per_hour&interval=1h"
 - [ ] Update `CLAUDE.md` with new ports and services
 
 **Critical Files:**
-- `core-services/monitoring/prometheus/prometheus.yml`
-- `core-services/monitoring/grafana/dashboards/elasticsearch-search.json`
+- `core_services/monitoring/prometheus/prometheus.yml`
+- `core_services/monitoring/grafana/dashboards/elasticsearch-search.json`
 - `docs/ALPR_Pipeline/Elasticsearch_Integration.md` (new)
 - `CLAUDE.md`
 
@@ -759,11 +759,11 @@ docker compose down
 
 # Revert changes
 git checkout HEAD -- docker-compose.yml
-git checkout HEAD -- core-services/api/query_api.py
-git checkout HEAD -- core-services/monitoring/prometheus/prometheus.yml
+git checkout HEAD -- core_services/api/query_api.py
+git checkout HEAD -- core_services/monitoring/prometheus/prometheus.yml
 
 # Remove new files
-rm -rf core-services/search
+rm -rf core_services/search
 rm -rf config/elasticsearch.yaml
 
 # Restart
@@ -777,10 +777,10 @@ docker compose up -d
 | File | Purpose | Pattern |
 |------|---------|---------|
 | `docker-compose.yml` | Add OpenSearch services | Follow kafka-consumer pattern |
-| `core-services/search/elasticsearch_consumer.py` | Main consumer | Follow `avro_kafka_consumer.py` |
-| `core-services/search/Dockerfile` | Container image | Follow `alerting/Dockerfile` |
-| `core-services/api/query_api.py` | Add search endpoints | Extend existing FastAPI |
-| `core-services/monitoring/prometheus/prometheus.yml` | Add scrape job | Follow existing jobs |
+| `core_services/search/elasticsearch_consumer.py` | Main consumer | Follow `avro_kafka_consumer.py` |
+| `core_services/search/Dockerfile` | Container image | Follow `alerting/Dockerfile` |
+| `core_services/api/query_api.py` | Add search endpoints | Extend existing FastAPI |
+| `core_services/monitoring/prometheus/prometheus.yml` | Add scrape job | Follow existing jobs |
 | `config/elasticsearch.yaml` | Configuration | Follow `kafka.yaml` pattern |
 
 ---

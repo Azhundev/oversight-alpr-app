@@ -1,8 +1,8 @@
 # ============================================================================
 # OVR-ALPR Edge Processing Dependencies
 # ============================================================================
-# Requirements for pilot.py and edge-services/ modules
-# For core-services (Docker), see individual service requirements.txt files
+# Requirements for pilot.py and edge_services/ modules
+# For core_services (Docker), see individual service requirements.txt files
 # Install: pip3 install -r requirements.txt
 # ============================================================================
 

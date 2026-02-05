@@ -41,13 +41,13 @@ fi
 
 # Start Kafka Consumer (in background)
 echo "Starting Kafka Consumer..."
-python3 core-services/storage/kafka_consumer.py > logs/kafka_consumer.log 2>&1 &
+python3 core_services/storage/kafka_consumer.py > logs/kafka_consumer.log 2>&1 &
 CONSUMER_PID=$!
 echo "Kafka Consumer started (PID: $CONSUMER_PID)"
 
 # Start Query API (in background)
 echo "Starting Query API..."
-python3 core-services/api/query_api.py > logs/query_api.log 2>&1 &
+python3 core_services/api/query_api.py > logs/query_api.log 2>&1 &
 API_PID=$!
 echo "Query API started (PID: $API_PID)"
 

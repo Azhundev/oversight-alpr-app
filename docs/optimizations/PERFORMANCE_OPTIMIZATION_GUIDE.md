@@ -137,7 +137,7 @@ See `docs/INT8_PRECISION_GUIDE.md` for detailed calibration instructions.
 
 ### Implementation
 
-Add resolution parameter to `YOLOv11Detector.__init__` in `edge-services/detector/detector_service.py`:
+Add resolution parameter to `YOLOv11Detector.__init__` in `edge_services/detector/detector_service.py`:
 
 ```python
 def __init__(
@@ -345,7 +345,7 @@ Frame N+2: Detection (15ms) → Queue OCR → Return (15ms) ✓
 
 ### Implementation: Threaded OCR Processing
 
-Create `edge-services/ocr/async_ocr_service.py`:
+Create `edge_services/ocr/async_ocr_service.py`:
 
 ```python
 import threading
@@ -552,7 +552,7 @@ Raw OCR results often contain:
 
 ### Implementation: Plate Text Normalization
 
-Create `edge-services/ocr/plate_processor.py`:
+Create `edge_services/ocr/plate_processor.py`:
 
 ```python
 import re
@@ -711,7 +711,7 @@ class PlateProcessor:
 
 ### Deduplication Service
 
-Create `edge-services/tracker/deduplication_service.py`:
+Create `edge_services/tracker/deduplication_service.py`:
 
 ```python
 import time
@@ -1018,7 +1018,7 @@ Camera 2 Detection ─┘
 
 ### Implementation
 
-Update `edge-services/detector/detector_service.py`:
+Update `edge_services/detector/detector_service.py`:
 
 ```python
 import torch
@@ -1311,7 +1311,7 @@ GPUs are **massively parallel**. A single detection only uses ~40% of GPU. Batch
 
 ### Implementation: Batch Detection
 
-Update `edge-services/detector/detector_service.py`:
+Update `edge_services/detector/detector_service.py`:
 
 ```python
 def detect_vehicles_batch(

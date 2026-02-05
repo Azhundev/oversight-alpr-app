@@ -126,7 +126,7 @@ services:
   kafka-consumer:
     build:
       context: .
-      dockerfile: core-services/storage/Dockerfile
+      dockerfile: core_services/storage/Dockerfile
     container_name: alpr-kafka-consumer
     depends_on:
       kafka:
@@ -165,7 +165,7 @@ services:
   alert-engine:
     build:
       context: .
-      dockerfile: core-services/alerting/Dockerfile
+      dockerfile: core_services/alerting/Dockerfile
     container_name: alpr-alert-engine
     depends_on:
       kafka:
@@ -248,7 +248,7 @@ services:
   query-api:
     build:
       context: .
-      dockerfile: core-services/api/Dockerfile
+      dockerfile: core_services/api/Dockerfile
     container_name: alpr-query-api
     depends_on:
       timescaledb:
@@ -271,6 +271,9 @@ services:
       MINIO_BUCKET: alpr-plate-images
       # OpenSearch configuration
       OPENSEARCH_HOSTS: http://opensearch:9200
+      # Tracing configuration
+      TEMPO_ENDPOINT: tempo:4317
+      ENABLE_TRACING: "true"
     volumes:
       # Docker socket for Service Manager (incremental startup control)
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -304,7 +307,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./core-services/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./core_services/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     networks:
       - alpr-network
@@ -342,8 +345,8 @@ services:
       GF_ANALYTICS_CHECK_FOR_UPDATES: false
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./core-services/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./core-services/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./core_services/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./core_services/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:
       - alpr-network
     restart: unless-stopped
@@ -395,13 +398,29 @@ services:
     ports:
       - "3100:3100"
     volumes:
-      - ./core-services/monitoring/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - ./core_services/monitoring/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
       - loki-data:/loki
     networks:
       - alpr-network
     restart: unless-stopped
     # Note: Loki uses distroless image without wget/curl, healthcheck removed
     # Service health can be verified via: curl http://localhost:3100/ready
+
+  # Tempo - Distributed Tracing
+  tempo:
+    image: grafana/tempo:2.3.1
+    container_name: alpr-tempo
+    command: ["-config.file=/etc/tempo/tempo-config.yaml"]
+    ports:
+      - "3200:3200"   # Tempo API
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ./core_services/monitoring/tempo/tempo-config.yaml:/etc/tempo/tempo-config.yaml:ro
+      - tempo-data:/var/tempo
+    networks:
+      - alpr-network
+    restart: unless-stopped
 
   # Promtail - Log shipper for Loki
   promtail:
@@ -411,7 +430,7 @@ services:
       - loki
     command: -config.file=/etc/promtail/promtail-config.yaml
     volumes:
-      - ./core-services/monitoring/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - ./core_services/monitoring/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./logs:/logs:ro
@@ -542,7 +561,7 @@ services:
   elasticsearch-consumer:
     build:
       context: .
-      dockerfile: core-services/search/Dockerfile
+      dockerfile: core_services/search/Dockerfile
     container_name: alpr-elasticsearch-consumer
     depends_on:
       kafka:
@@ -579,7 +598,7 @@ services:
   dlq-consumer:
     build:
       context: .
-      dockerfile: core-services/dlq/Dockerfile
+      dockerfile: core_services/dlq/Dockerfile
     container_name: alpr-dlq-consumer
     depends_on:
       kafka:
@@ -605,7 +624,7 @@ services:
   metrics-consumer:
     build:
       context: .
-      dockerfile: core-services/metrics/Dockerfile
+      dockerfile: core_services/metrics/Dockerfile
     container_name: alpr-metrics-consumer
     depends_on:
       kafka:
@@ -635,7 +654,7 @@ services:
   mlflow:
     build:
       context: .
-      dockerfile: core-services/mlflow/Dockerfile
+      dockerfile: core_services/mlflow/Dockerfile
     image: alpr-mlflow:v2.9.2
     container_name: alpr-mlflow
     depends_on:
@@ -689,6 +708,8 @@ volumes:
   grafana-data:
     driver: local
   loki-data:
+    driver: local
+  tempo-data:
     driver: local
 
   # Search & analytics volumes

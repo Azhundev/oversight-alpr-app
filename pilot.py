@@ -20,8 +20,8 @@ from datetime import datetime
 # Add project root and service directories to path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
-sys.path.insert(0, str(project_root / "edge-services"))
-sys.path.insert(0, str(project_root / "core-services"))
+sys.path.insert(0, str(project_root / "edge_services"))
+sys.path.insert(0, str(project_root / "core_services"))
 
 from camera.camera_ingestion import CameraManager
 from detector.detector_service import YOLOv11Detector

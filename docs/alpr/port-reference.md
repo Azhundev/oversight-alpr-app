@@ -31,6 +31,9 @@ Complete reference of all ports used by the ALPR pipeline components.
 | Grafana | 3000 | 3000 | HTTP | Metrics visualization | http://localhost:3000 |
 | Prometheus | 9090 | 9090 | HTTP | Metrics collection | http://localhost:9090 |
 | Loki | 3100 | 3100 | HTTP | Log aggregation | http://localhost:3100 |
+| Tempo | 3200 | 3200 | HTTP | Distributed tracing API | http://localhost:3200 |
+| Tempo OTLP gRPC | 4317 | 4317 | gRPC | OpenTelemetry traces (gRPC) | - |
+| Tempo OTLP HTTP | 4318 | 4318 | HTTP | OpenTelemetry traces (HTTP) | - |
 | Promtail | 9080 | - | HTTP | Log shipping (internal) | - |
 | cAdvisor | 8080 | 8082 | HTTP | Container metrics | http://localhost:8082 |
 | Node Exporter | 9100 | 9100 | HTTP | Host system metrics | http://localhost:9100 |
@@ -70,12 +73,15 @@ ALPR application services:
 - **Kafka Consumer (8002)**: Storage service internal metrics endpoint
 - **ALPR Pilot (8001)**: Edge processing metrics
 
-### Monitoring Stack (Ports 3000, 3001, 3100, 8082, 9090, 9100, 9187, 9308)
+### Monitoring Stack (Ports 3000, 3001, 3100, 3200, 4317, 4318, 8082, 9090, 9100, 9187, 9308)
 Observability and analytics infrastructure:
 - **Grafana (3000)**: Main monitoring dashboard
 - **Metabase (3001)**: Advanced BI and analytics
 - **Prometheus (9090)**: Metrics database and query engine
 - **Loki (3100)**: Log aggregation backend
+- **Tempo (3200)**: Distributed tracing backend
+- **Tempo OTLP gRPC (4317)**: OpenTelemetry trace ingestion (gRPC)
+- **Tempo OTLP HTTP (4318)**: OpenTelemetry trace ingestion (HTTP)
 - **cAdvisor (8082)**: Container resource metrics
 - **Node Exporter (9100)**: Host system metrics (CPU, memory, disk)
 - **Postgres Exporter (9187)**: TimescaleDB/PostgreSQL metrics
@@ -141,6 +147,11 @@ OpenSearch Dashboards: http://localhost:5601
 
 cAdvisor:           http://localhost:8082
   (No authentication)
+
+Tempo:              http://localhost:3200
+  Ready Check:      http://localhost:3200/ready
+  (No authentication)
+  Access via Grafana Explore → Select "Tempo" datasource
 ```
 
 ### Metrics Endpoints (Prometheus Format)
@@ -245,6 +256,7 @@ All services communicate on the `alpr-network` bridge network:
   - TimescaleDB: timescaledb:5432
   - OpenSearch: opensearch:9200
   - MinIO: minio:9000
+  - Tempo: tempo:4317 (OTLP gRPC for tracing)
 
 ### alert-engine (Alert Processing)
 - **Exposes**: 8003 (metrics)
@@ -260,6 +272,23 @@ All services communicate on the `alpr-network` bridge network:
   - Schema Registry: http://schema-registry:8081
   - OpenSearch: opensearch:9200
 
+### dlq-consumer (Dead Letter Queue Monitor)
+- **Exposes**: 8005 (metrics)
+- **Connects to**:
+  - Kafka: kafka:29092
+  - Schema Registry: http://schema-registry:8081
+
+### metrics-consumer (System Metrics Aggregation)
+- **Exposes**: 8006 (metrics)
+- **Connects to**:
+  - Kafka: kafka:29092
+  - Schema Registry: http://schema-registry:8081
+
+### Tempo (Distributed Tracing)
+- **Exposes**: 3200 (HTTP API), 4317 (OTLP gRPC), 4318 (OTLP HTTP)
+- **Receives traces from**:
+  - query-api: via OTLP gRPC (port 4317)
+
 ### Prometheus
 - **Exposes**: 9090 (HTTP + metrics)
 - **Scrapes from**:
@@ -268,13 +297,19 @@ All services communicate on the `alpr-network` bridge network:
   - query-api: query-api:8000
   - alert-engine: alert-engine:8003
   - elasticsearch-consumer: elasticsearch-consumer:8004
+  - dlq-consumer: dlq-consumer:8005
+  - metrics-consumer: metrics-consumer:8006
   - cAdvisor: cadvisor:8080
+  - node-exporter: node-exporter:9100
+  - postgres-exporter: postgres-exporter:9187
+  - kafka-exporter: kafka-exporter:9308
 
 ### Grafana
 - **Exposes**: 3000 (HTTP)
 - **Connects to**:
   - Prometheus: http://prometheus:9090
   - Loki: http://loki:3100
+  - Tempo: http://tempo:3200
 
 ## Environment Variable Port Configuration
 
@@ -306,7 +341,7 @@ SCHEMA_REGISTRY_URL: http://schema-registry:8081
 sudo netstat -tulpn | grep :8080
 
 # Check all ALPR-related ports
-sudo netstat -tulpn | grep -E ':(8000|8001|8002|8003|8004|8080|8081|8082|3000|3001|5432|5601|9000|9001|9090|9092|9200|9600)'
+sudo netstat -tulpn | grep -E ':(8000|8001|8002|8003|8004|8080|8081|8082|3000|3001|3100|3200|4317|4318|5432|5601|9000|9001|9090|9092|9200|9600)'
 ```
 
 ### Verify Docker Port Mappings
@@ -410,6 +445,7 @@ Monitoring:
   Grafana:         http://localhost:3000
   Metabase:        http://localhost:3001
   Prometheus:      http://localhost:9090
+  Tempo:           http://localhost:3200
   cAdvisor:        http://localhost:8082
 
 MLOps:
@@ -420,6 +456,11 @@ Metrics:
   Query API:       http://localhost:8000/metrics
   Alert Engine:    http://localhost:8003/metrics
   Search Indexer:  http://localhost:8004/metrics
+
+Tracing:
+  Tempo API:       http://localhost:3200
+  OTLP gRPC:       localhost:4317
+  OTLP HTTP:       localhost:4318
 "'
 ```
 

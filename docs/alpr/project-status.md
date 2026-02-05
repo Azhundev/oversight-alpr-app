@@ -1,6 +1,6 @@
 # OVR-ALPR Project Status
 
-**Last Updated:** 2026-02-01
+**Last Updated:** 2026-02-03
 
 This document provides a snapshot of the current implementation status, showing what's working, what's in progress, and what's planned next.
 
@@ -83,7 +83,7 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
   - Confidence filtering
 
 #### 6. Kafka Event Publishing ✅
-- **File:** `edge-services/event_processor/multi_topic_publisher.py`
+- **File:** `edge_services/event_processor/multi_topic_publisher.py`
 - **Status:** Production-ready with multi-topic Avro serialization
 - **Features:**
   - Multi-topic routing (alpr.events.plates, alpr.events.vehicles, alpr.metrics, alpr.dlq)
@@ -124,7 +124,7 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
   - Health checks
 
 #### 9. Kafka Consumer Service ✅
-- **File:** `core-services/storage/avro_kafka_consumer.py`
+- **File:** `core_services/storage/avro_kafka_consumer.py`
 - **Container:** `alpr-kafka-consumer`
 - **Status:** Production-ready with DLQ support
 - **Features:**
@@ -176,7 +176,7 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
   - Service Manager Dashboard (start/stop/restart services)
 
 #### 12b. Service Manager Dashboard ✅
-- **File:** `core-services/api/service_manager.py`
+- **File:** `core_services/api/service_manager.py`
 - **Container:** `alpr-query-api` (integrated)
 - **Status:** Production-ready
 - **Features:**
@@ -302,6 +302,19 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
   - Available at localhost:3100
   - Integration with Grafana
 
+#### 20b. Tempo ✅
+- **Container:** `alpr-tempo`
+- **Status:** Production-ready
+- **Features:**
+  - Distributed tracing backend
+  - OpenTelemetry (OTLP) protocol support
+  - OTLP gRPC receiver (port 4317)
+  - OTLP HTTP receiver (port 4318)
+  - Available at localhost:3200
+  - Integration with Grafana (trace visualization)
+  - Correlation with Loki logs (trace_id linking)
+  - Correlation with Prometheus metrics
+
 #### 21. Promtail ✅
 - **Container:** `alpr-promtail`
 - **Status:** Production-ready
@@ -337,7 +350,7 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
 
 #### 23. Alert Engine ✅
 - **Container:** `alpr-alert-engine`
-- **File:** `core-services/alerting/alert_engine.py`
+- **File:** `core_services/alerting/alert_engine.py`
 - **Status:** Production-ready
 - **Features:**
   - Real-time event-based notifications
@@ -356,7 +369,7 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
 
 #### 24. Elasticsearch Consumer ✅
 - **Container:** `alpr-elasticsearch-consumer`
-- **File:** `core-services/search/elasticsearch_consumer.py`
+- **File:** `core_services/search/elasticsearch_consumer.py`
 - **Status:** Production-ready with DLQ support
 - **Features:**
   - Real-time event indexing to OpenSearch
@@ -402,7 +415,7 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
 
 #### 27. DLQ Consumer ✅
 - **Container:** `alpr-dlq-consumer`
-- **File:** `core-services/dlq/dlq_consumer.py`
+- **File:** `core_services/dlq/dlq_consumer.py`
 - **Status:** Production-ready
 - **Features:**
   - Monitors Dead Letter Queue topic (`alpr.dlq`)
@@ -415,7 +428,7 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
 
 #### 28. Metrics Consumer ✅
 - **Container:** `alpr-metrics-consumer`
-- **File:** `core-services/metrics/metrics_consumer.py`
+- **File:** `core_services/metrics/metrics_consumer.py`
 - **Status:** Production-ready
 - **Features:**
   - Consumes system metrics from `alpr.metrics` topic
@@ -481,9 +494,12 @@ None - All Phase 4 features (Priorities 1-7) are fully implemented. Phase 4 is C
     - ✅ Automatic metrics and artifact logging
     - ✅ Model registration after training
 
-5. **Distributed Tracing (Tempo)** ❌
-    - OpenTelemetry instrumentation
-    - **Effort:** 2-3 weeks
+5. **Distributed Tracing (Tempo)** ✅
+    - ✅ Grafana Tempo deployed (localhost:3200)
+    - ✅ OpenTelemetry instrumentation in Query API
+    - ✅ OTLP gRPC/HTTP receivers
+    - ✅ Grafana integration with trace visualization
+    - ✅ Log-trace correlation with Loki
 
 ---
 
@@ -567,7 +583,7 @@ OVR-ALPR/
 │   └── api/
 │       └── query_api.py              # ✅ REST API (FastAPI)
 │
-├── core-services/                    # ✅ Backend/Cloud services (Docker)
+├── core_services/                    # ✅ Backend/Cloud services (Docker)
 │   ├── README.md                     # Core services overview
 │   ├── monitoring/                   # ✅ Monitoring stack
 │   │   ├── prometheus/
@@ -593,7 +609,7 @@ OVR-ALPR/
 │   ├── storage/                      # Storage services
 │   └── api/                          # Query API
 │
-├── edge-services/                    # ✅ Edge/Jetson services
+├── edge_services/                    # ✅ Edge/Jetson services
 │   ├── README.md                     # Edge services overview
 │   ├── camera/                       # Camera ingestion
 │   ├── detector/                     # Detection services
@@ -642,6 +658,14 @@ None currently - system is stable in production testing.
 
 ### Recent Enhancements
 
+- ✅ **2026-02-03:** **Distributed Tracing (Tempo) Complete** - Full observability with distributed tracing (Phase 6 MLOps - Distributed Tracing COMPLETE ✨)
+  - Grafana Tempo deployed via Docker Compose (localhost:3200)
+  - OpenTelemetry instrumentation added to Query API
+  - OTLP gRPC (port 4317) and HTTP (port 4318) receivers
+  - Grafana datasource with trace visualization
+  - Log-trace correlation (Loki → Tempo linking)
+  - Metrics-trace correlation (Prometheus → Tempo)
+  - Documentation: `docs/alpr/next-steps.md`
 - ✅ **2026-01-06:** **Advanced BI (Metabase) Complete** - Enterprise-grade business intelligence deployed (Phase 4 Priority 7 - COMPLETE ✨, **PHASE 4 NOW 100% COMPLETE!**)
   - Metabase latest deployed via Docker Compose (localhost:3001)
   - Connected to TimescaleDB for comprehensive ALPR data analysis

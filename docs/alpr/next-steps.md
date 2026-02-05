@@ -432,7 +432,7 @@ flowchart LR
 
 **Configuration:**
 ```yaml
-# core-services/monitoring/prometheus/prometheus.yml
+# core_services/monitoring/prometheus/prometheus.yml
 scrape_configs:
   - job_name: 'alpr-pilot'
     static_configs:

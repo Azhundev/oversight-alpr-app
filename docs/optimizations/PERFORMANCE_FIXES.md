@@ -485,14 +485,14 @@ ocr = EnhancedOCRService(enable_multi_pass=True)
 
 ### Test GPU Decode
 ```bash
-python3 edge-services/camera/gpu_camera_ingestion.py rtsp://camera/stream
+python3 edge_services/camera/gpu_camera_ingestion.py rtsp://camera/stream
 # Should see: "GPU decode (NVDEC) enabled"
 # FPS should be 30+ with <10% GPU
 ```
 
 ### Test Enhanced OCR
 ```bash
-python3 edge-services/ocr/enhanced_ocr.py test_plate.jpg
+python3 edge_services/ocr/enhanced_ocr.py test_plate.jpg
 # Should see multiple strategies being tried
 # Majority voting in logs
 ```

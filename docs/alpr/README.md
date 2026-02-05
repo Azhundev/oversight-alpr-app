@@ -49,6 +49,7 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
 | **Postgres Exporter** | Docker Container | TimescaleDB metrics (Port 9187) |
 | **Kafka Exporter** | Docker Container | Kafka broker metrics (Port 9308) |
 | **MLflow** | Docker Container | Model Registry & Experiment Tracking (Port 5000) |
+| **Tempo** | Docker Container | Distributed Tracing (Ports 3200, 4317, 4318) |
 
 ## Architecture
 
@@ -158,6 +159,9 @@ OVR-ALPR is a real-time license plate recognition system optimized for NVIDIA Je
   - 9200/9600 (OpenSearch)
   - 3000 (Grafana)
   - 3001 (Metabase)
+  - 3200 (Tempo API)
+  - 4317 (Tempo OTLP gRPC)
+  - 4318 (Tempo OTLP HTTP)
   - 9090 (Prometheus)
   - RTSP camera streams (if using IP cameras)
 
@@ -239,6 +243,7 @@ python3 pilot.py --no-display --frame-skip 2
 - **OpenSearch**: http://localhost:9200
 - **TimescaleDB**: localhost:5432 (user: alpr, db: alpr_db)
 - **MLflow**: http://localhost:5000 (Model Registry & Experiments)
+- **Tempo**: http://localhost:3200 (Distributed Tracing API)
 
 ### 6. Test the System
 
@@ -418,6 +423,13 @@ The system includes a complete monitoring stack for production deployments:
 - Time-based Analytics - Peak hours, day-of-week patterns, busiest times
 - Custom SQL queries for ad-hoc analysis
 - Scheduled email reports for stakeholders
+
+**Distributed Tracing** (Grafana Explore → Tempo):
+- End-to-end request tracing across services
+- OpenTelemetry instrumentation in Query API
+- Trace-to-log correlation (click trace → see related logs)
+- Trace-to-metrics correlation (see metrics for traced requests)
+- Service dependency visualization
 
 **Access**:
 - Grafana: http://localhost:3000 (Login: `admin` / `alpr_admin_2024`)

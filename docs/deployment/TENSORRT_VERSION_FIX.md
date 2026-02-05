@@ -29,7 +29,7 @@ Added intelligent version tracking that:
 - **Auto-rebuilds** if version mismatch detected
 
 **Files Modified:**
-- `edge-services/detector/detector_service.py` (lines 6-15, 87-131, 167-180)
+- `edge_services/detector/detector_service.py` (lines 6-15, 87-131, 167-180)
 
 **Version Files Created:**
 - `models/yolo11n.engine.version`
