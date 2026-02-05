@@ -32,6 +32,7 @@ kafka-python>=2.0.2         # Apache Kafka Python client
 
 # Confluent Kafka client (Avro serialization with Schema Registry)
 confluent-kafka>=2.3.0      # Confluent Kafka client with Avro support
+fastavro>=1.9.0             # Fast Avro serialization (required by confluent-kafka)
 avro-python3>=1.10.0        # Apache Avro serialization (if using pure Avro)
 
 # Event processing utilities
