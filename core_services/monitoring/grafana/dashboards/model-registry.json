@@ -49,7 +49,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 0, "y": 3 },
       "id": 1,
       "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "targets": [{ "expr": "up{job=\"mlflow\"}", "legendFormat": "MLflow Server", "refId": "A" }],
+      "targets": [{ "expr": "count(container_memory_usage_bytes{name=\"alpr-mlflow\"}) OR on() vector(0)", "legendFormat": "MLflow Server", "refId": "A" }],
       "title": "MLflow Server",
       "type": "stat"
     },
