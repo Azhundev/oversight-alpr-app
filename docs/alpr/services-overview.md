@@ -41,7 +41,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 ## System Summary
 
-**Total Services**: 18 core services + 8 infrastructure services + 10 monitoring/analytics services = **36 services total**
+**Total Services**: 18 core services + 9 infrastructure services + 10 monitoring/analytics services = **37 services total**
 
 **Edge Processing** (pilot.py):
 1. Camera Ingestion Service
@@ -73,6 +73,7 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 - TimescaleDB (time-series SQL database)
 - MinIO (S3-compatible object storage)
 - OpenSearch (full-text search and analytics engine)
+- OpenSearch Dashboards (search visualization UI)
 - MLflow (model registry and experiment tracking)
 
 **Monitoring & Analytics Stack** (Docker):

@@ -631,7 +631,7 @@ yolo export model=best.pt format=engine device=0 half=True
 - Volume management
 - Environment configuration
 
-**Usage in OVR-ALPR:** Orchestrates 31 services defined in `docker-compose.yml`, managing startup order, networking, and resource allocation.
+**Usage in OVR-ALPR:** Orchestrates 25 containers defined in `docker-compose.yml`, managing startup order, networking, and resource allocation.
 
 **Command:**
 ```bash

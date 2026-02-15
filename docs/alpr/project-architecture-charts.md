@@ -437,7 +437,7 @@ graph LR
         C2["15-25 FPS throughput"]
         C3["Multi-topic Kafka<br/>(4 topics)"]
         C4["Advanced BI dashboards"]
-        C5["31 services operational"]
+        C5["25 containers operational"]
         C6["MLflow Model Registry"]
     end
 

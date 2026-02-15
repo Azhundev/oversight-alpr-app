@@ -101,7 +101,7 @@ python scripts/training/train_with_mlflow.py --data plates.yaml --epochs 100  # 
 - Phase 6 Priority 12 COMPLETE: Distributed Tracing (Tempo) operational
 - Phase 6 Priority 10 COMPLETE: MLflow Model Registry operational
 - Phase 4 COMPLETE: OpenSearch, Multi-topic Kafka, Metabase BI
-- 16 core services + 7 infrastructure + 7 monitoring services + 1 MLOps
+- 6 core services + 8 infrastructure + 10 monitoring services + 1 MLOps (25 containers)
 - Tempo at http://localhost:3200 for distributed tracing
 - MLflow at http://localhost:5000 for model versioning and experiment tracking
 - Next: Phase 5 Scale & Optimization (DeepStream, Triton - optional)
