@@ -753,6 +753,7 @@ license:
 
 ## Related Documentation
 
+- [Model Distribution](model-distribution.md) - MLflow model registry for team
 - [GitHub Setup Guide](github-setup-guide.md) - Repository setup
 - [Project Structure](project-structure.md) - Code organization
 - [Modular Deployment](modular-deployment.md) - License-based features

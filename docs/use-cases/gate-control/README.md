@@ -20,6 +20,7 @@ ALPR gate control system deployed as SaaS with edge devices per customer.
 | [modular-deployment.md](modular-deployment.md) | License validation, feature flags, Docker profiles |
 | [github-setup-guide.md](github-setup-guide.md) | Creating the repo, migration from OVR-ALPR |
 | [team-development-guide.md](team-development-guide.md) | Testing without Jetson (CPU mode, mocks, remote access) |
+| [model-distribution.md](model-distribution.md) | MLflow model registry, downloading models |
 
 ### Use Cases
 

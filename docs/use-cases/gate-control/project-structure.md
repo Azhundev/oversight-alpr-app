@@ -903,6 +903,7 @@ VERSION=1.0.0 docker compose --profile core up -d
 
 - [GitHub Setup Guide](github-setup-guide.md) - Step-by-step repository creation
 - [Team Development Guide](team-development-guide.md) - Testing without Jetson hardware
+- [Model Distribution](model-distribution.md) - MLflow model registry for team
 - [Modular Deployment](modular-deployment.md) - License-based module loading
 - [Feature Tiers](feature-tiers.md) - Complete feature breakdown
 - [SaaS Business Model](saas-business-model.md) - Business model

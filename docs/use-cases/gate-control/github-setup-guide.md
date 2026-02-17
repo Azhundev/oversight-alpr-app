@@ -943,6 +943,7 @@ git push origin main --tags     # Push with tags
 ## Related Documentation
 
 - [Team Development Guide](team-development-guide.md) - Testing without Jetson hardware
+- [Model Distribution](model-distribution.md) - MLflow model registry for team
 - [Project Structure](project-structure.md) - Detailed directory layout
 - [Modular Deployment](modular-deployment.md) - License-based features
 - [Feature Tiers](feature-tiers.md) - Feature breakdown by tier
