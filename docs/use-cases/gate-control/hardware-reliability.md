@@ -490,6 +490,7 @@ For business use, consider:
 
 - [Project Structure](project-structure.md) - Single repository architecture (alpr-edge)
 - [Modular Deployment](modular-deployment.md) - License-based module configuration
+- [Model Distribution](model-distribution.md) - MLflow model registry for team
 - [Deployment Analysis](deployment-analysis.md) - Technical deployment guide
 - [SaaS Business Model](saas-business-model.md) - Multi-customer business model
 - [Feature Tiers](feature-tiers.md) - Feature breakdown by tier

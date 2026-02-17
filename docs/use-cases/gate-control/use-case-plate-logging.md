@@ -1095,6 +1095,7 @@ Combined with gate control:
 - [Gate Control Use Case](use-case-gate-control.md) - Base features (Plate Logging extends this)
 - [Project Structure](project-structure.md) - Single repository architecture
 - [Modular Deployment](modular-deployment.md) - License-based feature loading
+- [Model Distribution](model-distribution.md) - MLflow model registry for team
 - [Feature Tiers](feature-tiers.md) - Scaling options and tier comparison
 - [Deployment Analysis](deployment-analysis.md) - Hardware, costs, architecture
 - [Hardware Reliability](hardware-reliability.md) - 24/7 operation

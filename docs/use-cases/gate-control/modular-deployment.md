@@ -1157,6 +1157,7 @@ Jetson Orin NX 16GB:   Enterprise (comfortable)
 
 - [GitHub Setup Guide](github-setup-guide.md) - Step-by-step repository creation
 - [Project Structure](project-structure.md) - Repository organization
+- [Model Distribution](model-distribution.md) - MLflow model registry for team
 - [Feature Tiers](feature-tiers.md) - Feature breakdown by tier
 - [SaaS Business Model](saas-business-model.md) - Business model details
 - [Hardware Reliability](hardware-reliability.md) - Production reliability

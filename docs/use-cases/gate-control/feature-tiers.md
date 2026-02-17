@@ -688,6 +688,7 @@ For customers who want hands-off operation:
 
 - [Project Structure](project-structure.md) - Single repository architecture (alpr-edge)
 - [Modular Deployment](modular-deployment.md) - License-based module configuration
+- [Model Distribution](model-distribution.md) - MLflow model registry for team
 - [SaaS Business Model](saas-business-model.md) - Business model overview
 - [Deployment Analysis](deployment-analysis.md) - Technical deployment guide
 - [Hardware Reliability](hardware-reliability.md) - 24/7 operation guide

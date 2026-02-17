@@ -345,6 +345,7 @@ Each customer gets their own Jetson device. You maintain a central cloud portal 
 
 - [Project Structure](project-structure.md) - Single repository architecture (alpr-edge)
 - [Modular Deployment](modular-deployment.md) - License-based module configuration
+- [Model Distribution](model-distribution.md) - MLflow model registry for team
 - [Feature Tiers](feature-tiers.md) - Complete feature breakdown by tier
 - [Deployment Analysis](deployment-analysis.md) - Technical deployment guide
 - [Hardware Reliability](hardware-reliability.md) - 24/7 operation best practices

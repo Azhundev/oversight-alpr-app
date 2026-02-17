@@ -618,6 +618,7 @@ endpoints:
 - [Plate Logging Use Case](use-case-plate-logging.md) - Entry/exit logging with timestamps (extends Gate Control)
 - [Project Structure](project-structure.md) - Single repository architecture for all use cases
 - [Modular Deployment](modular-deployment.md) - License-based feature loading
+- [Model Distribution](model-distribution.md) - MLflow model registry for team
 - [Feature Tiers](feature-tiers.md) - Scaling features for different needs
 - [Hardware Reliability](hardware-reliability.md) - 24/7 operation best practices
 - [SaaS Business Model](saas-business-model.md) - Multi-customer deployment

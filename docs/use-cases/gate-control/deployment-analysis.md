@@ -504,6 +504,7 @@ features:
 
 - [Project Structure](project-structure.md) - Single repository architecture (alpr-edge)
 - [Modular Deployment](modular-deployment.md) - License-based module configuration
+- [Model Distribution](model-distribution.md) - MLflow model registry for team
 - [Use Case: Gate Control](use-case-gate-control.md) - Access control implementation
 - [Use Case: Plate Logging](use-case-plate-logging.md) - Entry/exit logging (extends Gate Control)
 - [Feature Tiers](feature-tiers.md) - Scaling features by tier
