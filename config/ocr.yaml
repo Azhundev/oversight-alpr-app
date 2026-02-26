@@ -27,7 +27,7 @@ ocr:
     denoise: true   # NL-means denoising — helps with video compression noise
     enhance_contrast: true  # CLAHE — handles uneven lighting and shadows
     sharpen: false  # Unsharp mask — leave off, EnhancedOCR handles sharpening internally
-    remove_color: false  # Florida orange logo inpainting — enable if logo causes misreads
+    remove_color: true   # Florida orange logo inpainting — logo breaks character segmentation
     adaptive_threshold: false  # EnhancedOCR applies adaptive threshold as one of its strategies
 
   # Post-processing
