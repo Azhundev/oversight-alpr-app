@@ -2,6 +2,11 @@
 """
 YOLO Training Script with MLflow Experiment Tracking
 
+Environment Variables (required for MinIO artifact storage):
+    AWS_ACCESS_KEY_ID: MinIO access key (default: alpr_minio)
+    AWS_SECRET_ACCESS_KEY: MinIO secret key
+    MLFLOW_S3_ENDPOINT_URL: MinIO endpoint (default: http://localhost:9000)
+
 This script trains YOLOv11 models with full MLflow integration for:
 - Experiment tracking (hyperparameters, metrics)
 - Artifact logging (model files, plots, configs)
@@ -34,6 +39,11 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
+
+# Set MinIO credentials if not already in environment
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "alpr_minio")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "alpr_minio_secure_pass_2024")
+os.environ.setdefault("MLFLOW_S3_ENDPOINT_URL", "http://localhost:9000")
 
 import mlflow
 from mlflow.tracking import MlflowClient
@@ -209,8 +219,12 @@ class MLflowYOLOTrainer:
                 if hasattr(results, 'results_dict'):
                     metrics = results.results_dict
                     for key, value in metrics.items():
-                        if isinstance(value, (int, float)):
-                            mlflow.log_metric(key, value)
+                        try:
+                            # Sanitize metric name: remove chars invalid for MLflow
+                            safe_key = key.replace("(", "_").replace(")", "")
+                            mlflow.log_metric(safe_key, float(value))
+                        except (TypeError, ValueError):
+                            pass
 
                 # Find training output directory
                 train_dir = Path(project) / run_name
@@ -340,15 +354,15 @@ class MLflowYOLOTrainer:
 
         logger.success(f"Created model version: {version.version}")
 
-        # Transition to specified stage
-        if stage:
-            self.client.transition_model_version_stage(
+        # Set alias (MLflow 3.x replaced stages with aliases)
+        if stage and stage != "None":
+            alias = stage.lower()  # "Staging" -> "staging", "Production" -> "production"
+            self.client.set_registered_model_alias(
                 name=model_name,
+                alias=alias,
                 version=version.version,
-                stage=stage,
-                archive_existing_versions=(stage == "Production"),
             )
-            logger.success(f"Transitioned to {stage}")
+            logger.success(f"Set alias '{alias}' on version {version.version}")
 
         return version.version
 
