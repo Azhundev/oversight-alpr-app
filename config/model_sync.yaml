@@ -1,0 +1,41 @@
+model_sync:
+  # How often to poll MLflow for new champion versions (seconds)
+  poll_interval_seconds: 3600   # 1 hour default; set lower (e.g. 300) for faster rollouts
+
+  # MLflow tracking server
+  mlflow_uri: "http://localhost:5000"
+
+  # MLflow alias to track — only versions with this alias are downloaded
+  alias: "champion"
+
+  # Directory where active model files live (relative to project root)
+  models_dir: "models"
+
+  # Models to track: map MLflow registered model name → local filename
+  models:
+    - mlflow_name: "alpr-florida-plate-detector"
+      local_filename: "yolo11n-plate.pt"
+    - mlflow_name: "alpr-vehicle-detector"
+      local_filename: "yolo11n.pt"
+
+  # Path to the local manifest file (written by agent; do not edit manually)
+  manifest_path: "models/manifest.json"
+
+  # What to do after a model is updated
+  on_update:
+    restart_pilot: true
+    # Primary restart command (requires sudo or systemd socket activation)
+    restart_command: "systemctl restart alpr-pilot"
+    # Flag file created after update (in addition to restart); pilot.py may check this
+    flag_file: "models/.update-pending"
+
+  # Optional portal reporting (Phase 2 — leave enabled: false for now)
+  reporting:
+    enabled: false
+    endpoint: null          # e.g. https://portal.example.com/api/devices/{device_id}/status
+    device_id: null         # auto-detected from hostname when null
+    api_key: null
+
+  # Port for the local HTTP status endpoint
+  # GET http://localhost:8005/status → JSON with model versions and sync state
+  status_port: 8005

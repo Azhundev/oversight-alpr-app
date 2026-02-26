@@ -1,0 +1,58 @@
+# alpr-model-sync.service — ALPR Model Sync Agent
+#
+# Polls MLflow for new `champion` model versions, downloads and validates them,
+# swaps them into the models/ directory, and triggers alpr-pilot restart.
+#
+# Installation:
+#   sudo cp scripts/systemd/alpr-model-sync.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable alpr-model-sync
+#   sudo systemctl start alpr-model-sync
+#
+# Logs:
+#   journalctl -u alpr-model-sync -f
+#
+# Status endpoint (while running):
+#   curl http://localhost:8005/status
+#
+# Dependencies:
+#   - Requires alpr-pilot.service to be installed (for the restart trigger to work)
+#   - Requires access to MLflow at http://localhost:5000 (or as configured)
+#   - Requires sudo permissions for: systemctl restart alpr-pilot
+#
+# Sudo setup (add to /etc/sudoers via visudo):
+#   jetson ALL=(ALL) NOPASSWD: /bin/systemctl restart alpr-pilot
+#   jetson ALL=(ALL) NOPASSWD: /bin/systemctl stop alpr-pilot
+#   jetson ALL=(ALL) NOPASSWD: /bin/systemctl start alpr-pilot
+
+[Unit]
+Description=ALPR Model Sync Agent
+Documentation=https://github.com/your-org/alpr-edge
+After=network.target alpr-pilot.service
+Wants=network.target
+# Do not hard-depend on alpr-pilot so sync agent starts even if pilot is stopped
+PartOf=
+
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+WorkingDirectory=/home/jetson/OVR-ALPR
+ExecStart=/usr/bin/python3 /home/jetson/OVR-ALPR/edge_services/model_sync/model_sync_agent.py \
+    --config /home/jetson/OVR-ALPR/config/model_sync.yaml
+Restart=on-failure
+RestartSec=30s
+TimeoutStartSec=60s
+TimeoutStopSec=15s
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/jetson/OVR-ALPR/.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alpr-model-sync
+
+[Install]
+WantedBy=multi-user.target

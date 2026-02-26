@@ -1,0 +1,50 @@
+# alpr-pilot.service — ALPR Edge Pipeline (pilot.py)
+#
+# Installation:
+#   sudo cp scripts/systemd/alpr-pilot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable alpr-pilot
+#   sudo systemctl start alpr-pilot
+#
+# Logs:
+#   journalctl -u alpr-pilot -f
+#
+# Notes:
+#   - Restart=always ensures systemd auto-restarts pilot.py after a model sync restart
+#   - WorkingDirectory must match your project root
+#   - Adjust User and ExecStart path to match your deployment
+
+[Unit]
+Description=ALPR Edge Pipeline (pilot.py)
+Documentation=https://github.com/your-org/alpr-edge
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=jetson
+Group=jetson
+WorkingDirectory=/home/jetson/OVR-ALPR
+ExecStart=/usr/bin/python3 /home/jetson/OVR-ALPR/pilot.py
+Restart=always
+RestartSec=5s
+# Allow enough time to load YOLO + TensorRT models before systemd gives up
+TimeoutStartSec=120s
+TimeoutStopSec=30s
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/jetson/OVR-ALPR/.env
+
+# Resource limits
+# Uncomment to cap CPU/memory if running alongside other services
+# CPUQuota=80%
+# MemoryMax=4G
+
+# Logging — journald captures stdout/stderr
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alpr-pilot
+
+[Install]
+WantedBy=multi-user.target
