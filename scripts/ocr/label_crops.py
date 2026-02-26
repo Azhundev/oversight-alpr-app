@@ -11,11 +11,11 @@ Usage:
     python scripts/ocr/label_crops.py --review        # review existing labels (edit mistakes)
 
 Controls:
-    A–Z, 0–9    Type plate characters
+    A–Z, 0–9    Type plate characters (all letters including S and Q are safe to type)
     Backspace   Delete last character
     Enter       Save label and advance
-    S           Skip this crop (mark as unreadable)
-    Q           Quit and save progress
+    Escape      Skip this crop (mark as unreadable)
+    Ctrl+Q      Quit and save progress
 """
 
 import argparse
@@ -116,7 +116,7 @@ def build_display(plate_img: np.ndarray, typed: str, index: int, total: int,
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_SAVED, 1, cv2.LINE_AA)
 
     # Key hints
-    hints = "Enter=save   S=skip   Backspace=delete   Q=quit"
+    hints = "Enter=save   Esc=skip   Backspace=delete   Ctrl+Q=quit"
     cv2.putText(panel, hints, (12, UI_HEIGHT - 12),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.38, COLOR_HINT, 1, cv2.LINE_AA)
 
@@ -157,7 +157,7 @@ def run_labeler(crops_dir: Path, output_path: Path, redo: bool, review: bool):
     print(f"  To process    : {total}")
     print(f"  Output file   : {output_path}")
     print(f"{'─' * 50}")
-    print("  Controls: type plate text → Enter to save, S to skip, Q to quit")
+    print("  Controls: type plate text → Enter to save, Esc to skip, Ctrl+Q to quit")
     print(f"{'─' * 50}\n")
 
     if total == 0:
@@ -216,7 +216,7 @@ def run_labeler(crops_dir: Path, output_path: Path, redo: bool, review: bool):
                 i += 1
                 break
 
-            elif key in (ord('s'), ord('S')):  # Skip
+            elif key == 27:  # Escape — skip unreadable crop
                 labels[str(img_path)] = SKIP_LABEL
                 save_labels(labels, output_path)
                 last_saved = ""
@@ -225,7 +225,7 @@ def run_labeler(crops_dir: Path, output_path: Path, redo: bool, review: bool):
                 i += 1
                 break
 
-            elif key in (ord('q'), ord('Q')):  # Quit
+            elif key == 17:  # Ctrl+Q — quit
                 cv2.destroyAllWindows()
                 _print_summary(saved_this_session, skipped_this_session, output_path, labels)
                 return
