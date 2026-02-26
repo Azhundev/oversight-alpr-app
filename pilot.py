@@ -159,6 +159,7 @@ class ALPRPilot:
         self.track_best_plate_crop = {}  # track_id -> best plate crop image
         self.track_best_plate_bbox = {}  # track_id -> best plate bbox
         self.track_best_plate_frame = {}  # track_id -> frame number of best shot
+        self.track_crop_saved = set()  # track_ids whose first crop has been saved to disk
 
         # OCR throttling parameters (gate scenario)
         self.ocr_min_track_frames = 2  # Wait for stable track
@@ -560,7 +561,7 @@ class ALPRPilot:
             plate_image_path = None
             if track_id in self.track_best_plate_crop:
                 date_folder = datetime.now().strftime('%Y-%m-%d')
-                filename = f"{camera_id}_track{track_id}_frame{self.track_best_plate_frame.get(track_id, 0)}_q{self.track_best_plate_quality.get(track_id, 0):.2f}.jpg"
+                filename = f"{camera_id}_track{track_id}.jpg"
                 local_image_path = str(self.crops_dir / date_folder / filename)
 
                 # Will be updated to S3 URL after upload (in _save_best_crop_to_disk)
@@ -622,7 +623,7 @@ class ALPRPilot:
 
     def _save_best_crop_to_disk(self, track_id: int, camera_id: str):
         """
-        Save the best cached plate crop for a track to disk and upload to MinIO
+        Upload the best cached plate crop to MinIO (crop is already on disk from _save_plate_crop).
 
         Args:
             track_id: Track identifier
@@ -633,23 +634,24 @@ class ALPRPilot:
                 logger.warning(f"No cached crop for track {track_id}")
                 return
 
-            plate_crop = self.track_best_plate_crop[track_id]
             quality_score = self.track_best_plate_quality[track_id]
             frame_number = self.track_best_plate_frame[track_id]
 
-            # Create date-based folder
+            # Stable filename — matches what _save_plate_crop writes
             date_folder = datetime.now().strftime('%Y-%m-%d')
             date_crops_dir = self.crops_dir / date_folder
             date_crops_dir.mkdir(exist_ok=True, parents=True)
 
-            # Generate filename with track ID, frame, and quality score
-            filename = f"{camera_id}_track{track_id}_frame{frame_number}_q{quality_score:.2f}.jpg"
+            filename = f"{camera_id}_track{track_id}.jpg"
             filepath = date_crops_dir / filename
 
-            # Save crop to disk first
-            cv2.imwrite(str(filepath), plate_crop)
-            self.crop_counter += 1
-            logger.success(f"💾 Saved plate crop: {date_folder}/{filename} (quality: {quality_score:.3f})")
+            # Crop is already on disk (written by _save_plate_crop on every quality improvement).
+            # If somehow missing (e.g. OCR success before first quality update), write it now.
+            if not filepath.exists():
+                cv2.imwrite(str(filepath), self.track_best_plate_crop[track_id])
+                logger.success(f"Saved plate crop: {date_folder}/{filename} (quality: {quality_score:.3f})")
+            else:
+                logger.success(f"Plate crop ready: {date_folder}/{filename} (quality: {quality_score:.3f})")
 
             # Upload to MinIO asynchronously (after file is saved)
             # Auto-reconnect to MinIO if currently disconnected
@@ -732,21 +734,20 @@ class ALPRPilot:
 
                 logger.debug(f"Track {track_id}: New best plate quality {quality_score:.3f} (frame {self.frame_count})")
 
-                # Only save to disk when forced (track ending or high confidence reached)
-                if force_save:
-                    # Create date-based folder (e.g., output/crops/2025-11-25/)
-                    date_folder = datetime.now().strftime('%Y-%m-%d')
-                    date_crops_dir = self.crops_dir / date_folder
-                    date_crops_dir.mkdir(exist_ok=True)
+                # Always save to disk when quality improves (or first detection).
+                # Stable per-track filename — better shots silently overwrite the previous file.
+                date_folder = datetime.now().strftime('%Y-%m-%d')
+                date_crops_dir = self.crops_dir / date_folder
+                date_crops_dir.mkdir(exist_ok=True)
 
-                    # Generate filename with track ID and best frame number
-                    filename = f"{camera_id}_track{track_id}_frame{self.track_best_plate_frame[track_id]}_q{quality_score:.2f}.jpg"
-                    filepath = date_crops_dir / filename
+                filename = f"{camera_id}_track{track_id}.jpg"
+                filepath = date_crops_dir / filename
 
-                    # Save best crop for this track
-                    cv2.imwrite(str(filepath), plate_crop)
+                cv2.imwrite(str(filepath), plate_crop)
+                if track_id not in self.track_crop_saved:
+                    self.track_crop_saved.add(track_id)
                     self.crop_counter += 1
-                    logger.info(f"Saved BEST plate crop for track {track_id}: {date_folder}/{filename} (quality: {quality_score:.3f})")
+                logger.debug(f"Track {track_id}: Updated crop {date_folder}/{filename} (quality: {quality_score:.3f})")
 
         except Exception as e:
             logger.error(f"Failed to save plate crop: {e}")
