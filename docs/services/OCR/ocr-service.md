@@ -371,30 +371,40 @@ self.ocr_executor.submit(lambda: self.ocr.recognize_plate(...))
 
 Async `ThreadPoolExecutor` gave noticeably better FPS because YOLO detection was never blocked by OCR. These engines are thread-safe and can restore that benefit:
 
-#### Option 1 — `fast-plate-ocr` (recommended first try)
+#### Option 1 — `fast-plate-ocr` (**TESTED — do not use for Florida plates**)
 
-ONNX Runtime-backed recognizer trained specifically on license plates. ONNX Runtime `InferenceSession` is explicitly thread-safe.
+ONNX Runtime-backed recognizer trained on global license plates. Thread-safe and fast (~11–14ms), but **completely misreads Florida plates**. The `global-plates-mobile-vit-v2-model` was not trained on Florida plate designs and has no concept of the Sunshine State citrus graphic layout.
 
-```bash
-pip install fast-plate-ocr
-```
+**Test results on real Florida plate crops (2026-02-25):**
+
+| Plate | fast-plate-ocr read | PaddleOCR read | Actual |
+|---|---|---|---|
+| `HYUL84` | `B4W557S` | `HYUEL84` | `HYUL84` |
+| `LLKD78` | `JZG90` | `LLKD78` | `LLKD78` |
+| `O6DAYV` | `GC30N` | `O6DAWV` | `O6DAYV` |
+
+PaddleOCR's worst result was 1–2 character errors (mostly the orange logo leaking through). `fast-plate-ocr` was completely unrecognizable on every plate tested.
+
+**API note (v1.0+):** The class name changed. The correct import is:
 
 ```python
-from fast_plate_ocr import ONNXPlateRecognizer
+from fast_plate_ocr import LicensePlateRecognizer   # NOT ONNXPlateRecognizer
 
-reader = ONNXPlateRecognizer("global-plates-mobile-vit-v2-model")
-
-# In the ThreadPoolExecutor worker — safe to call from any thread
-text = reader.run(plate_crop)  # numpy BGR array in, string out
+reader = LicensePlateRecognizer("global-plates-mobile-vit-v2-model")
+text = reader.run(plate_crop_grayscale)   # expects 1-channel (grayscale) input
 ```
+
+Also note: `fast-plate-ocr` pip install pulls in NumPy 2.x which breaks Jetson's PyTorch build (compiled against NumPy 1.x). If installed, run `pip install "numpy<2"` immediately after.
+
+**Verdict:** Skip for Florida deployments. May be viable if a Florida-specific model is trained and exported to ONNX format (see Option 3).
 
 | Property | Value |
 |---|---|
 | Thread-safe | ✅ ONNX Runtime |
-| Latency | ~5–20ms per plate |
+| Latency | ~11–14ms per plate |
 | GPU required | No (fast on CPU) |
-| Plate-specific model | ✅ |
-| Jetson packaging | Standard pip |
+| Florida plate accuracy | ❌ Completely wrong |
+| Jetson packaging | Standard pip (NumPy conflict — see above) |
 
 #### Option 2 — EasyOCR recognition-only (already installed)
 
