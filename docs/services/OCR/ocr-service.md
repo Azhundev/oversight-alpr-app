@@ -346,6 +346,50 @@ Batch processing with `recognize_plates_batch()` amortizes overhead — processi
 
 ---
 
+## Known Issues & Pitfalls
+
+### PaddleOCR is not thread-safe (DO NOT run async)
+
+**Symptom:** Moving OCR to a `ThreadPoolExecutor` background thread causes all OCR futures to silently return `None`. The `track_ocr_cache` stays empty, no plate text appears in the display, but plate bounding boxes are still drawn (YOLO detection unaffected).
+
+**Root cause:** PaddleOCR's Paddle inference C++ backend is not safe to call from a non-main thread. The call raises an internal exception that is swallowed by `fut.result()` inside the `except Exception` handler, making it appear like OCR ran but found nothing.
+
+**What was tried:**
+```python
+# DOES NOT WORK — Paddle inference fails silently in worker thread
+self.ocr_executor = ThreadPoolExecutor(max_workers=1)
+self.ocr_executor.submit(lambda: self.ocr.recognize_plate(...))
+```
+
+**Fix:** Keep OCR synchronous. The existing `should_run_ocr()` throttling in `pilot.py` already limits OCR to at most `ocr_max_attempts` calls per track and skips tracks that don't yet have 2+ stable frames — so synchronous OCR at ~200ms does not block the pipeline at a meaningful rate.
+
+**If async is ever needed:** use `multiprocessing` (separate process with its own Paddle runtime) rather than `threading`.
+
+---
+
+### EasyOCR (PlateOCR) is too slow for real-time use on Jetson
+
+**Symptom:** Switching `pilot.py` to `PlateOCR` (EasyOCR + PaddleOCR ensemble) causes plate crop count to drop dramatically. Even with GPU, EasyOCR takes ~700ms per inference call on the Orin NX.
+
+**Root cause:** EasyOCR is accurate but not optimized for Jetson. At 700ms per call, it blocks the frame loop, starving YOLO of frames.
+
+**Fix:** Use `PaddleOCRService` (synchronous, ~200ms, 3 strategies) as the primary OCR engine. EasyOCR can be used offline for post-processing or validation but not in the real-time loop.
+
+---
+
+### Florida orange logo breaks character segmentation
+
+**Symptom:** OCR reads garbage in the middle section of the plate (e.g. `OCP🍊4B0` → `OCPEHED`). The orange Sunshine State graphic between the letter and number groups is detected as characters.
+
+**Fix:** Enable `remove_color: true` in `config/ocr.yaml`. This masks the orange HSV region (hue 5–25°) and inpaints it with surrounding pixels before OCR runs, eliminating the false character detections.
+
+```yaml
+preprocessing:
+  remove_color: true   # Required for Florida plates
+```
+
+---
+
 ## Related
 
 - `edge_services/detector/` — YOLO plate detector that produces bounding boxes fed into OCR
