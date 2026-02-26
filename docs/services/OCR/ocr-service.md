@@ -363,7 +363,84 @@ self.ocr_executor.submit(lambda: self.ocr.recognize_plate(...))
 
 **Fix:** Keep OCR synchronous. The existing `should_run_ocr()` throttling in `pilot.py` already limits OCR to at most `ocr_max_attempts` calls per track and skips tracks that don't yet have 2+ stable frames — so synchronous OCR at ~200ms does not block the pipeline at a meaningful rate.
 
-**If async is ever needed:** use `multiprocessing` (separate process with its own Paddle runtime) rather than `threading`.
+**If async is ever needed:** use a thread-safe OCR engine (see section below) rather than switching to `multiprocessing`. Multiprocessing adds IPC overhead and complicates model lifecycle management.
+
+---
+
+### Thread-safe OCR engines for async use
+
+Async `ThreadPoolExecutor` gave noticeably better FPS because YOLO detection was never blocked by OCR. These engines are thread-safe and can restore that benefit:
+
+#### Option 1 — `fast-plate-ocr` (recommended first try)
+
+ONNX Runtime-backed recognizer trained specifically on license plates. ONNX Runtime `InferenceSession` is explicitly thread-safe.
+
+```bash
+pip install fast-plate-ocr
+```
+
+```python
+from fast_plate_ocr import ONNXPlateRecognizer
+
+reader = ONNXPlateRecognizer("global-plates-mobile-vit-v2-model")
+
+# In the ThreadPoolExecutor worker — safe to call from any thread
+text = reader.run(plate_crop)  # numpy BGR array in, string out
+```
+
+| Property | Value |
+|---|---|
+| Thread-safe | ✅ ONNX Runtime |
+| Latency | ~5–20ms per plate |
+| GPU required | No (fast on CPU) |
+| Plate-specific model | ✅ |
+| Jetson packaging | Standard pip |
+
+#### Option 2 — EasyOCR recognition-only (already installed)
+
+EasyOCR is PyTorch-based and therefore thread-safe. 90% of its 700ms cost in earlier tests was the **detection** step. Since YOLO already provides cropped plates, detection can be skipped entirely using `reader.recognize()`:
+
+```python
+import easyocr
+
+reader = easyocr.Reader(['en'], gpu=True, verbose=False)
+
+# SLOW — runs detect + recognize on the full image (~700ms)
+# result = reader.readtext(plate_crop)
+
+# FAST — skips detection, recognition only on pre-cropped plate (~80–150ms)
+result = reader.recognize(plate_crop)
+```
+
+| Property | Value |
+|---|---|
+| Thread-safe | ✅ PyTorch |
+| Latency | ~80–150ms (recognition only) |
+| GPU | ✅ Already working on Orin NX |
+| Already installed | ✅ |
+
+#### Option 3 — ONNX Runtime + custom CRNN
+
+Any CRNN model exported to ONNX can be served via `onnxruntime.InferenceSession`, which is thread-safe and supports the CUDA execution provider on Jetson. Useful if a fine-tuned Florida-plate CRNN is trained later.
+
+```python
+import onnxruntime as ort
+
+sess = ort.InferenceSession("plate_crnn.onnx", providers=["CUDAExecutionProvider"])
+# sess.run() is thread-safe
+```
+
+#### Implementation note
+
+When restoring async OCR, the `crop.copy()` pattern from the previous attempt is correct — always copy the frame crop before submitting to the executor so the main loop can advance the frame buffer safely:
+
+```python
+crop = frame[y1:y2, x1:x2].copy()   # copy before submit
+future = executor.submit(ocr_fn, crop, bbox, attempt)
+track_ocr_futures[track_id] = future
+```
+
+Collect completed futures at the top of the next frame's OCR block, not inside the submission loop.
 
 ---
 
