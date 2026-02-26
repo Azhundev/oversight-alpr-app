@@ -25,7 +25,7 @@ sys.path.insert(0, str(project_root / "core_services"))
 
 from camera.camera_ingestion import CameraManager
 from detector.detector_service import YOLOv11Detector
-from ocr.enhanced_ocr import EnhancedOCRService
+from ocr.plate_ocr import PlateOCR
 from tracker.bytetrack_service import ByteTrackService, Detection
 from shared.utils.tracking_utils import bbox_to_numpy, get_track_color, draw_track_id
 from event_processor.event_processor_service import EventProcessorService
@@ -124,14 +124,15 @@ class ALPRPilot:
         # Initialize OCR
         self.ocr = None
         if self.enable_ocr:
-            logger.info("Initializing Enhanced OCR...")
-            self.ocr = EnhancedOCRService(
-                config_path="config/ocr.yaml",
+            logger.info("Initializing PlateOCR (EasyOCR GPU + PaddleOCR ensemble)...")
+            self.ocr = PlateOCR(
                 use_gpu=True,
-                enable_multi_pass=True,
+                use_easyocr=True,
+                use_paddleocr=True,
+                enable_ensemble=True,
             )
             logger.info("Warming up OCR...")
-            self.ocr.warmup(iterations=5)
+            self.ocr.warmup(iterations=3)
 
         # Initialize Tracker
         self.tracker = None
