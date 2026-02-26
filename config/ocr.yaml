@@ -24,11 +24,11 @@ ocr:
     # Upscale small plates for better OCR
     min_plate_height: 48
     target_height: 128  # Higher for better OCR accuracy
-    denoise: false  # DISABLED - too aggressive, destroys text
-    enhance_contrast: false  # DISABLED - let PaddleOCR handle it
-    sharpen: false  # DISABLED - causes artifacts
-    remove_color: false  # DISABLED - PaddleOCR works better with color
-    adaptive_threshold: false  # Use PaddleOCR's built-in preprocessing
+    denoise: true   # NL-means denoising — helps with video compression noise
+    enhance_contrast: true  # CLAHE — handles uneven lighting and shadows
+    sharpen: false  # Unsharp mask — leave off, EnhancedOCR handles sharpening internally
+    remove_color: false  # Florida orange logo inpainting — enable if logo causes misreads
+    adaptive_threshold: false  # EnhancedOCR applies adaptive threshold as one of its strategies
 
   # Post-processing
   postprocessing:
@@ -36,10 +36,10 @@ ocr:
     use_whitelist: true
     whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-    # Confidence filtering (lowered for better detection)
-    min_confidence: 0.40  # Lower to catch more plates (was 0.50)
-    min_text_length: 3  # Minimum characters
-    max_text_length: 10  # Maximum characters
+    # Confidence filtering
+    min_confidence: 0.35  # Lowered: EnhancedOCR boosts confidence via majority voting
+    min_text_length: 4    # Raised: 3-char reads are almost never valid plates
+    max_text_length: 10   # Maximum characters
 
   # Performance
   performance:

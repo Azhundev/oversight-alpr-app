@@ -25,7 +25,7 @@ sys.path.insert(0, str(project_root / "core_services"))
 
 from camera.camera_ingestion import CameraManager
 from detector.detector_service import YOLOv11Detector
-from ocr.ocr_service import PaddleOCRService
+from ocr.enhanced_ocr import EnhancedOCRService
 from tracker.bytetrack_service import ByteTrackService, Detection
 from shared.utils.tracking_utils import bbox_to_numpy, get_track_color, draw_track_id
 from event_processor.event_processor_service import EventProcessorService
@@ -124,11 +124,11 @@ class ALPRPilot:
         # Initialize OCR
         self.ocr = None
         if self.enable_ocr:
-            logger.info("Initializing PaddleOCR...")
-            self.ocr = PaddleOCRService(
+            logger.info("Initializing Enhanced OCR...")
+            self.ocr = EnhancedOCRService(
                 config_path="config/ocr.yaml",
                 use_gpu=True,
-                enable_tensorrt=False,
+                enable_multi_pass=True,
             )
             logger.info("Warming up OCR...")
             self.ocr.warmup(iterations=5)
@@ -1206,10 +1206,9 @@ class ALPRPilot:
                     # SINGLE OCR - continuous improvement for gate control
                     # Metrics: Time OCR operation
                     ocr_start = time.time()
-                    plate_detection = self.ocr.recognize_plate(
+                    plate_detection = self.ocr.recognize_plate_multi_pass(
                         frame,
                         plate_bbox,
-                        preprocess=True
                     )
                     ocr_time = time.time() - ocr_start
 
