@@ -396,15 +396,19 @@ def train(args):
                 print("   (MinIO may not be running — model is saved locally)")
 
             if args.register:
-                run_id = mlflow.active_run().info.run_id
-                mv = mlflow.register_model(
-                    f"runs:/{run_id}/{onnx_path.name}",
-                    "alpr-florida-ocr-crnn",
-                )
-                print(f"Registered in MLflow: alpr-florida-ocr-crnn v{mv.version}")
-                print(f"Promote to champion:")
-                print(f"  mlflow models set-model-alias --model-name alpr-florida-ocr-crnn "
-                      f"--alias champion --version {mv.version}")
+                try:
+                    run_id = mlflow.active_run().info.run_id
+                    mv = mlflow.register_model(
+                        f"runs:/{run_id}/{onnx_path.name}",
+                        "alpr-florida-ocr-crnn",
+                    )
+                    print(f"Registered in MLflow: alpr-florida-ocr-crnn v{mv.version}")
+                    print(f"Promote to champion:")
+                    print(f"  mlflow models set-model-alias --model-name alpr-florida-ocr-crnn "
+                          f"--alias champion --version {mv.version}")
+                except Exception as e:
+                    print(f"⚠  MLflow registration skipped ({e})")
+                    print("   (Start Docker services first: docker compose up -d)")
 
         print(f"\nFiles in {out_dir}/")
         for p in sorted(out_dir.iterdir()):
