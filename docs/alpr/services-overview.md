@@ -41,16 +41,17 @@ The OVR-ALPR system is built with a modular service architecture, where each ser
 
 ## System Summary
 
-**Total Services**: 18 core services + 9 infrastructure services + 10 monitoring/analytics services = **37 services total**
+**Total Services**: 19 core services + 9 infrastructure services + 10 monitoring/analytics services = **38 services total**
 
-**Edge Processing** (pilot.py):
+**Edge Processing** (pilot.py + background services):
 1. Camera Ingestion Service
 2. GPU Camera Ingestion Service (alternative)
 3. Detector Service (YOLOv11)
 4. Tracker Service (ByteTrack)
-5. OCR Service (PaddleOCR)
+5. OCR Service (PlateOCR / PaddleOCR, async)
 6. Event Processor Service
 7. Multi-Topic Avro Kafka Publisher Service (with Schema Registry & topic routing)
+8. Model Sync Agent (poll MLflow, distribute models, trigger restarts)
 
 **Backend Services** (Docker):
 8. Storage Service (Database abstraction)
@@ -338,68 +339,97 @@ for track in active_tracks:
 
 ---
 
-### 5. OCR Service (PaddleOCR)
+### 5. OCR Service (PlateOCR)
 
-**Location**: `services/ocr/ocr_service.py`
+**Location**: `edge_services/ocr/plate_ocr.py`
 
 **Purpose**: License plate text recognition from plate crops
 
 **Key Features**:
-- Multi-strategy OCR (raw, preprocessed, upscaled)
-- Florida plate orange logo removal
-- Adaptive preprocessing (denoise, CLAHE, sharpen)
-- Confidence-based filtering
-- Batch processing support
+- PaddleOCR with 3 preprocessing strategies (CLAHE, adaptive threshold, sharpen)
+- Async via `ThreadPoolExecutor(max_workers=1)` — YOLO never blocked by OCR
+- Florida plate pattern validation and position-aware character correction
+- Per-track result caching and throttling
 
 **Configuration**: `config/ocr.yaml`
 
-**Main Class**: `PaddleOCRService`
+**Main Class**: `PlateOCR`
 
 **Methods**:
-- `recognize_plate(frame, bbox, preprocess=True)`
-  - Returns: `PlateDetection` (text, confidence, bbox)
-  - Tries multiple preprocessing strategies, returns best
-
-- `recognize_plates_batch(frame, bboxes, preprocess=True)`
-  - Returns: `List[PlateDetection]`
-  - Batch inference for multiple plates
-
-- `normalize_plate_text(text)`
-  - Returns: Uppercase, alphanumeric only
-  - Removes spaces, dashes, special chars
-
-**Preprocessing Pipeline**:
-1. Orange logo removal (Florida plates)
-2. Grayscale conversion
-3. Resize (if too small)
-4. Denoise (fastNlMeansDenoising)
-5. Contrast enhancement (CLAHE)
-6. Sharpening (optional, for motion blur)
+- `recognize_plate_crop(crop)` — takes BGR numpy array, returns `(text, conf)` or `None`. Used by the async executor in pilot.py.
+- `read(crop)` — returns `OCRResult` with `.text`, `.confidence`, `.source`
+- `warmup(iterations=1)` — pre-warm PaddleOCR to avoid cold-start
 
 **Usage Example**:
 ```python
-from services.ocr.ocr_service import PaddleOCRService
+from ocr.plate_ocr import PlateOCR
+from concurrent.futures import ThreadPoolExecutor
 
-ocr = PaddleOCRService(
-    config_path="config/ocr.yaml",
-    use_gpu=True
-)
+ocr = PlateOCR(use_gpu=True, use_easyocr=False)
+ocr.warmup(iterations=1)
+executor = ThreadPoolExecutor(max_workers=1)
 
-ocr.warmup(iterations=5)
-
-# Single plate
-plate_detection = ocr.recognize_plate(frame, plate_bbox)
-if plate_detection:
-    print(f"Plate: {plate_detection.text} (conf: {plate_detection.confidence:.2f})")
-
-# Batch
-plate_detections = ocr.recognize_plates_batch(frame, plate_bboxes)
+crop = frame[y1:y2, x1:x2].copy()   # copy before submit
+fut = executor.submit(ocr.recognize_plate_crop, crop)
+# ... collect fut.result() next frame
 ```
 
 **Performance Notes**:
-- 50-150ms per plate (single)
-- Multi-strategy adds latency but improves accuracy
-- GPU acceleration provides 2-3x speedup
+- ~600–900ms per plate (3 strategies, async — does not block YOLO)
+- Results lag current frame by ~9 frames at 15 FPS (acceptable for gate/parking)
+- Future: `CRNNOCRService` (~30ms, thread-safe ONNX) once 500+ labeled crops are available
+
+---
+
+### 5b. Model Sync Agent
+
+**Location**: `edge_services/model_sync/model_sync_agent.py`
+
+**Purpose**: Automatic model distribution to 10+ Jetson edge devices. Runs as a systemd background service alongside pilot.py.
+
+**Key Features**:
+- Polls MLflow `champion` alias on a configurable interval (default: 60 min)
+- Downloads new versions to `models/staging/`, validates integrity, then atomic-swaps to `models/`
+- Updates `models/manifest.json` with mlflow_name, version, run_id, and download timestamp per model
+- Triggers `systemctl restart alpr-pilot`; falls back to SIGTERM to pilot PID if no sudo
+- Offline-resilient: logs warning and skips sync cycle if MLflow is unreachable
+- Status HTTP endpoint at port 8005 (`GET /status`)
+
+**Configuration**: `config/model_sync.yaml`
+
+**Main Class**: `ModelSyncAgent`
+
+**Key Methods**:
+- `run()` — main poll loop
+- `sync_all_models()` — iterates configured models
+- `sync_model(config)` — check registry, download, validate, swap, trigger restart
+- `_get_registry_version(name, alias)` — calls `MlflowClient.get_model_version_by_alias()` (MLflow 3.x)
+- `_validate_model(path)` — checks magic bytes for `.pt`, file size for `.engine`
+
+**Usage Example**:
+```bash
+# Single sync (test)
+python3 edge_services/model_sync/model_sync_agent.py --once
+
+# Continuous poll loop
+python3 edge_services/model_sync/model_sync_agent.py
+
+# Install systemd services
+sudo cp scripts/systemd/alpr-*.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now alpr-pilot alpr-model-sync
+```
+
+**Status Endpoint**:
+```bash
+curl http://localhost:8005/status
+# Returns: device_id, current model versions, last_sync, mlflow_reachable
+```
+
+**Performance Notes**:
+- Minimal resource usage (sleeps between polls)
+- Model swap is atomic (staging → production move)
+- Manifest always reflects what's actually on disk, not what's in MLflow
 
 ---
 

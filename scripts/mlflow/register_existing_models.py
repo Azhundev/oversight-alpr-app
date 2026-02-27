@@ -29,7 +29,7 @@ from loguru import logger
 
 # Configuration
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
-MODELS_DIR = Path(__file__).parent.parent / "models"
+MODELS_DIR = Path(__file__).parent.parent.parent / "models"
 
 # Model definitions
 MODELS_TO_REGISTER = [
@@ -50,8 +50,8 @@ MODELS_TO_REGISTER = [
         },
     },
     {
-        "name": "alpr-plate-detector",
-        "description": "YOLOv11 license plate detector. Custom trained for detecting license plates on vehicles.",
+        "name": "alpr-florida-plate-detector",
+        "description": "YOLOv11 license plate detector. Custom trained for detecting Florida license plates on vehicles.",
         "files": {
             "pt": "yolo11n-plate.pt",
             "engine": "yolo11n-plate.engine",
@@ -203,14 +203,13 @@ def register_model(
 
             logger.success(f"  Created model version: {model_version.version}")
 
-            # Transition to Production stage
-            client.transition_model_version_stage(
+            # Set champion alias (MLflow 3.x — replaces deprecated stage transitions)
+            client.set_registered_model_alias(
                 name=model_name,
+                alias="champion",
                 version=model_version.version,
-                stage="Production",
-                archive_existing_versions=True,
             )
-            logger.success(f"  Model version {model_version.version} promoted to Production")
+            logger.success(f"  Model version {model_version.version} aliased as 'champion'")
 
         except Exception as e:
             logger.error(f"  Failed to create model version: {e}")
@@ -232,6 +231,11 @@ def main():
 
     logger.info(f"Models directory: {MODELS_DIR}")
     logger.info(f"MLflow tracking URI: {MLFLOW_TRACKING_URI}")
+
+    # MinIO credentials for artifact storage (same as mlflow_model_loader.py)
+    os.environ.setdefault("AWS_ACCESS_KEY_ID", "alpr_minio")
+    os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "alpr_minio_secure_pass_2024")
+    os.environ.setdefault("MLFLOW_S3_ENDPOINT_URL", "http://localhost:9000")
 
     # Initialize MLflow
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
@@ -265,10 +269,11 @@ def main():
     # Print registered models
     logger.info("\n--- Registered Models ---")
     for model in client.search_registered_models():
-        latest_versions = client.get_latest_versions(model.name)
-        for version in latest_versions:
+        versions = client.search_model_versions(f"name='{model.name}'")
+        for version in versions:
+            aliases = getattr(version, "aliases", [])
             logger.info(
-                f"  {model.name} v{version.version} [{version.current_stage}]"
+                f"  {model.name} v{version.version}  aliases={aliases}"
             )
 
     logger.info("\nAccess MLflow UI at: http://localhost:5000")

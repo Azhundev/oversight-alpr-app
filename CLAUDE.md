@@ -74,6 +74,9 @@ python scripts/training/train_with_mlflow.py --data plates.yaml --epochs 100  # 
 - Pilot (edge) publishes to: Kafka (localhost:9092), loads models from MLflow
 
 ### Recent Major Changes
+- ✅ OCR now async via ThreadPoolExecutor — YOLO no longer blocked by OCR (2026-02-26)
+- ✅ CRNN+ONNX training pipeline built — deploy when 500+ labeled crops available (2026-02-26)
+- ✅ Model sync agent for automatic model distribution to edge devices (2026-02-25)
 - ✅ Added Grafana Tempo for distributed tracing (2026-02-02)
 - ✅ Added MLflow Model Registry for model versioning (2026-02-01)
 - ✅ Integrated OpenSearch for full-text search and analytics (2025-12-29)
@@ -95,6 +98,8 @@ python scripts/training/train_with_mlflow.py --data plates.yaml --epochs 100  # 
 7. **Check OpenSearch**: http://localhost:9200/_cluster/health
 8. **Register models**: Run `python scripts/mlflow/register_existing_models.py`
 9. **Train with tracking**: Run `python scripts/training/train_with_mlflow.py --data plates.yaml`
+11. **Label plate crops for OCR training**: Run `python scripts/ocr/label_crops.py --crops-dir output/crops --output data/ocr_training/labels.txt`
+12. **Retrain CRNN OCR** (when 500+ labels): Run `python scripts/ocr/train_crnn.py --labels data/ocr_training/labels.txt`
 10. **View traces**: Grafana → Explore → Select "Tempo" datasource
 
 ### Current System Status

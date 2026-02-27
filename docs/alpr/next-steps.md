@@ -1,6 +1,6 @@
 # ALPR System - Next Steps & Roadmap
 
-**Last Updated:** 2026-02-03
+**Last Updated:** 2026-02-26
 
 This document compares the original system vision with current implementation status and outlines the next modules/services needed to achieve the complete production architecture.
 
@@ -57,7 +57,8 @@ flowchart LR
 | **Video Decode** | NVDEC (GPU) | NVDEC GPU (RTSP), CPU (video files) | ✅ Implemented |
 | **Vehicle Detection** | DeepStream + YOLO | YOLOv11 + TensorRT FP16 | ✅ Implemented |
 | **Plate Detection** | DeepStream + YOLO | YOLOv11 + TensorRT FP16 | ✅ Implemented |
-| **OCR** | DeepStream probe | PaddleOCR (per-track throttling) | ✅ Implemented |
+| **OCR** | DeepStream probe | PlateOCR / PaddleOCR (async, 3 strategies, `use_easyocr=False`) | ✅ Implemented |
+| **Model Distribution** | Manual model updates | Model Sync Agent (MLflow champion alias → auto-deploy) | ✅ Implemented |
 | **Tracking** | NvDCF (GPU) | ByteTrack (CPU) | ✅ Implemented |
 | **Crops** | Automatic cropping | Best-shot selection + cropping | ✅ Implemented |
 | **Event Publishing** | nvmsgbroker | kafka-python (KafkaPublisher) | ✅ Implemented |
@@ -106,14 +107,16 @@ flowchart LR
 
 | Component | Original Plan | Current Implementation | Status |
 |-----------|---------------|------------------------|--------|
-| **Model Registry** | NGC/MLflow | MLflow 2.9.2 (localhost:5000) | ✅ Implemented |
-| **Model Versioning** | Automated tracking | MLflow Model Registry with stages | ✅ Implemented |
+| **Model Registry** | NGC/MLflow | MLflow 3.x (localhost:5000) | ✅ Implemented |
+| **Model Versioning** | Automated tracking | MLflow Model Registry with alias-based promotion (`champion`) | ✅ Implemented |
+| **Model Distribution** | Manual per-device | Model Sync Agent (auto-poll, download, restart) | ✅ Implemented |
 | **Training Pipeline** | TAO Toolkit | train_with_mlflow.py + Ultralytics | ✅ Implemented |
+| **OCR Training** | N/A | CRNN pipeline built; blocked at 58 labels (need 500+) | ⏳ Data collection |
 | **Metrics/Logs** | Prometheus + Loki | Prometheus 2.x + Loki 2.x + Promtail | ✅ Implemented |
 | **Tracing** | Tempo | Grafana Tempo + OpenTelemetry | ✅ Implemented |
 | **Monitoring** | Grafana dashboards | Grafana 10.x with 7 dashboards | ✅ Implemented |
 
-**MLOps Status:** 🟢 **100% Complete** - Model Registry, versioning, training pipeline, and distributed tracing operational.
+**MLOps Status:** 🟢 **100% Complete** - Model Registry, versioning, training pipeline, distributed tracing, and automated model distribution (sync agent) operational.
 
 ---
 

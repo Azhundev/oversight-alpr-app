@@ -25,7 +25,7 @@ sys.path.insert(0, str(project_root / "core_services"))
 
 from camera.camera_ingestion import CameraManager
 from detector.detector_service import YOLOv11Detector
-from ocr.crnn_ocr_service import CRNNOCRService
+from ocr.plate_ocr import PlateOCR
 from tracker.bytetrack_service import ByteTrackService, Detection
 from shared.utils.tracking_utils import bbox_to_numpy, get_track_color, draw_track_id
 from event_processor.event_processor_service import EventProcessorService
@@ -124,13 +124,10 @@ class ALPRPilot:
         # Initialize OCR
         self.ocr = None
         if self.enable_ocr:
-            logger.info("Initializing CRNN OCR...")
-            self.ocr = CRNNOCRService(
-                model_path="models/crnn_florida/florida_plate_ocr.onnx",
-                use_gpu=True,
-            )
+            logger.info("Initializing PlateOCR (PaddleOCR + EasyOCR ensemble)...")
+            self.ocr = PlateOCR(use_gpu=True, use_easyocr=False)
             logger.info("Warming up OCR...")
-            self.ocr.warmup(iterations=3)
+            self.ocr.warmup(iterations=1)
 
         # Initialize Tracker
         self.tracker = None
@@ -162,11 +159,11 @@ class ALPRPilot:
 
         # OCR throttling parameters (gate scenario)
         self.ocr_min_track_frames = 2  # Wait for stable track
-        self.ocr_min_confidence = 0.50  # CRNN confidence scale differs from PaddleOCR
-        self.ocr_max_confidence_target = 0.80
+        self.ocr_min_confidence = 0.40  # PlateOCR confidence (ensemble-boosted)
+        self.ocr_max_confidence_target = 0.75
         self.ocr_max_attempts = 20  # Reasonable attempts
 
-        # Async OCR — CRNNOCRService is thread-safe (onnxruntime)
+        # Async OCR — PlateOCR ensemble runs in a single background thread
         from concurrent.futures import ThreadPoolExecutor
         self.ocr_executor = ThreadPoolExecutor(max_workers=1)
         self.track_ocr_futures = {}       # track_id -> Future
@@ -1172,7 +1169,7 @@ class ALPRPilot:
                 self._save_plate_crop(frame, plate_bbox, track_id, camera_id, force_save=False)
 
         # Run OCR on detected plates — async via ThreadPoolExecutor
-        # CRNNOCRService (onnxruntime) is thread-safe; YOLO never waits for OCR.
+        # PlateOCR runs in a single background thread (max_workers=1); YOLO never waits for OCR.
         plate_texts = {}  # Map vehicle index to plate text
         ocr_runs_this_frame = 0
 

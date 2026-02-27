@@ -1,486 +1,223 @@
 # OCR Service
 
 **Module:** `edge_services/ocr/`
-**Config:** `config/ocr.yaml`
-**Engine:** PaddleOCR (PP-OCRv4) + optional EasyOCR ensemble
+**Active class:** `PlateOCR` (`plate_ocr.py`) — PaddleOCR, async via `ThreadPoolExecutor`
 
-The OCR service converts license plate image crops into text strings. It runs on the Jetson Orin NX after the plate detector identifies plate bounding boxes, and outputs normalized plate text with a confidence score to the event processor.
-
----
-
-## Overview
-
-Three classes are available, each trading latency for accuracy:
-
-| Class | File | Engine(s) | Strategies | Best for |
-|---|---|---|---|---|
-| `PaddleOCRService` | `ocr_service.py` | PaddleOCR | 3 | Production (primary) |
-| `EnhancedOCRService` | `enhanced_ocr.py` | PaddleOCR | 5 | Difficult conditions |
-| `PlateOCR` | `plate_ocr.py` | PaddleOCR + EasyOCR | 3 × 2 engines | Highest accuracy |
-
-`PaddleOCRService` is the default used by `pilot.py`. `EnhancedOCRService` and `PlateOCR` are drop-in replacements for situations requiring higher accuracy at the cost of extra latency.
+The OCR service converts license plate crop images into text strings. It runs on the Jetson Orin NX after the YOLO plate detector identifies bounding boxes, and outputs normalized plate text with a confidence score to the event processor.
 
 ---
 
-## Quick Start
+## Current setup (pilot.py)
 
 ```python
-from edge_services.ocr import PaddleOCRService
-from shared.schemas.event import BoundingBox
+from ocr.plate_ocr import PlateOCR
 
-ocr = PaddleOCRService(config_path="config/ocr.yaml", use_gpu=True)
-ocr.warmup()
+ocr = PlateOCR(use_gpu=True, use_easyocr=False)
+ocr.warmup(iterations=1)
 
-# Single plate
-bbox = BoundingBox(x1=100, y1=200, x2=300, y2=260)
-result = ocr.recognize_plate(frame, bbox)
-if result:
-    print(f"{result.text}  conf={result.confidence:.2f}")
-
-# Batch (more efficient for multiple plates per frame)
-results = ocr.recognize_plates_batch(frame, [bbox1, bbox2, bbox3])
+# Runs async — main thread never blocks on OCR
+ocr_executor = ThreadPoolExecutor(max_workers=1)
+fut = ocr_executor.submit(ocr.recognize_plate_crop, crop)
+# ... collect fut.result() at top of next frame
 ```
+
+OCR is submitted to a single background thread so YOLO detection never waits for it. Results arrive 1–2 frames later and are cached per track.
 
 ---
 
-## Processing Pipeline
+## Files
 
-```
-frame + bounding box(es)
-         │
-         ▼
-  ┌─────────────────────────────────────────┐
-  │            Plate Crop Extraction        │
-  │  Clamp coords to frame bounds           │
-  │  Reject invalid / empty crops           │
-  └─────────────┬───────────────────────────┘
-                │
-         ┌──────┴───────┐
-         │              │
-         ▼              ▼
-  Strategy 1      Strategy 2         Strategy 3
-  Raw image       Preprocessed       2× Upscaled
-  (no changes)    (CLAHE + denoise   (for plates
-                  + optional         < 80px tall)
-                  sharpening)
-         │              │                  │
-         └──────┬────────┘──────────────────┘
-                │
-                ▼
-        Select highest confidence result
-                │
-                ▼
-        Post-processing
-        - Uppercase, strip non-alphanumeric
-        - Apply character whitelist
-        - Filter by confidence / length
-                │
-                ▼
-        PlateDetection(text, confidence, bbox, raw_text)
-```
-
----
-
-## Classes
-
-### `PaddleOCRService` (primary)
-
-**File:** `edge_services/ocr/ocr_service.py`
-
-```python
-PaddleOCRService(
-    config_path="config/ocr.yaml",
-    use_gpu=True,
-    enable_tensorrt=False,   # TensorRT optimization (requires model conversion)
-)
-```
-
-**Methods:**
-
-| Method | Description |
-|---|---|
-| `recognize_plate(frame, bbox, preprocess=True)` | Single plate — tries all 3 strategies, returns best |
-| `recognize_plates_batch(frame, bboxes, preprocess=True)` | Multiple plates per frame — more efficient than looping |
-| `preprocess_plate_crop(plate_crop)` | Standalone preprocessing (CLAHE, denoise, optional Florida orange logo removal) |
-| `normalize_plate_text(text)` | Uppercase + strip + whitelist |
-| `warmup(iterations=5)` | Run dummy inference to avoid cold-start latency on first real frame |
-
-**Multi-strategy logic:**
-
-1. **Raw** — Pass the crop directly; best for high-quality, well-lit plates
-2. **Preprocessed** — Apply `preprocess_plate_crop()` (CLAHE contrast enhancement, optional denoising, optional sharpening); best for noisy or poorly lit plates
-3. **2× Upscaled** — Only applied when plate height < 80 px; helps for distant plates
-
-The strategy with the highest PaddleOCR confidence score wins.
-
-**Florida orange logo removal:**
-
-Enabled via `preprocessing.remove_color: true` in `config/ocr.yaml`. Converts the crop to HSV, masks the orange Sunshine State logo (hue 5–25°), and inpaints the masked region before running OCR. Disabled by default because PaddleOCR generally handles color input well.
-
----
-
-### `EnhancedOCRService`
-
-**File:** `edge_services/ocr/enhanced_ocr.py`
-
-Drop-in replacement with 5 preprocessing strategies and majority voting. Adds ~2–3× latency but improves accuracy in difficult conditions.
-
-```python
-EnhancedOCRService(
-    config_path="config/ocr.yaml",
-    use_gpu=True,
-    enable_multi_pass=True,   # set False to use only Strategy 1 (same as PaddleOCRService)
-)
-```
-
-**5 preprocessing strategies:**
-
-| # | Technique | Best for |
+| File | Status | Purpose |
 |---|---|---|
-| 1 | CLAHE + fast NL-means denoise | Standard conditions |
-| 2 | Global histogram equalization + bilateral filter | Faded or low-contrast plates |
-| 3 | Adaptive Gaussian threshold (auto-inverted) | Uneven lighting, shadows |
-| 4 | CLAHE + morphological closing | Broken or incomplete characters |
-| 5 | CLAHE + unsharp masking (3×3 Laplacian) | Motion blur |
-
-**Voting:**
-
-Results from all strategies are grouped by normalized text. The text that appears most often across strategies wins. If multiple strategies agree, the confidence is boosted by `min(0.1 × (votes − 1), 0.15)` — capped at +15%.
+| `plate_ocr.py` | **Active** | `PlateOCR` — PaddleOCR with preprocessing, currently used by pilot.py |
+| `crnn_ocr_service.py` | Ready, not deployed | Thread-safe ONNX CRNN — deploy once 500+ labeled samples are available |
+| `ocr_service.py` | Superseded | `PaddleOCRService` — synchronous, kept for reference |
+| `enhanced_ocr.py` | Superseded | `EnhancedOCRService` — 5-strategy multi-pass, kept for reference |
 
 ---
 
-### `PlateOCR`
+## PlateOCR (active)
 
 **File:** `edge_services/ocr/plate_ocr.py`
 
-Ensemble of PaddleOCR + EasyOCR with Florida plate pattern validation.
-
 ```python
-from edge_services.ocr.plate_ocr import PlateOCR
-
-ocr = PlateOCR(
+PlateOCR(
     use_gpu=True,
-    use_easyocr=True,
+    use_easyocr=False,   # EasyOCR disabled — poor accuracy on plate crops, adds latency
     use_paddleocr=True,
     enable_ensemble=True,
 )
-
-result = ocr.read(plate_crop)  # takes BGR numpy array directly
-if result:
-    print(result.text, result.confidence, result.source)
-    # source: 'paddle', 'easyocr', or 'ensemble' (both agreed)
 ```
 
-**`OCRResult` fields:**
+### Methods
 
-| Field | Type | Description |
-|---|---|---|
-| `text` | str | Final normalized plate text |
-| `confidence` | float | 0.0–1.0; boosted if engines agree or pattern validates |
-| `raw_text` | str | Text before normalization |
-| `source` | str | `'paddle'`, `'easyocr'`, or `'ensemble'` |
-
-**Florida pattern validation:**
-
-```
-ABC1234   ← 3 letters + 4 digits (standard)
-ABCD12    ← 3 letters + letter + 2 digits (specialty)
-123ABC    ← 3 digits + 3 letters (older)
-AB12CD    ← 2 letters + 2 digits + 2 letters
-```
-
-Any result matching a known pattern gets a +0.10 confidence boost. If two or more strategies agree on the same text, an additional +0.10 is added.
-
-**Character correction table:**
-
-Position-aware substitutions applied before pattern matching:
-
-| Char | Corrected to | Applied in positions |
-|---|---|---|
-| `O` | `0` | Numeric region (chars 4+) |
-| `I` | `1` | Numeric region |
-| `L` | `1` | Numeric region |
-| `S` | `5` | Numeric region |
-| `Z` | `2` | Numeric region |
-| `B` | `8` | Numeric region |
-| `G` | `6` | Numeric region |
-
-Reverse corrections (`0→O`, `1→I`, etc.) are applied in the letter region (first 3 chars).
-
----
-
-## Configuration (`config/ocr.yaml`)
-
-```yaml
-ocr:
-  paddle:
-    use_gpu: true
-    gpu_mem: 2000               # MB allocated on GPU
-    det_db_thresh: 0.3          # text detection sensitivity (lower = more detections)
-    det_db_box_thresh: 0.6      # box confidence threshold
-    rec_batch_num: 6            # plates processed together per inference call
-
-  preprocessing:
-    min_plate_height: 48        # upscale plates shorter than this (pixels)
-    target_height: 128          # upscale target height
-    denoise: false              # NL-means denoising (disabled: too aggressive)
-    enhance_contrast: false     # CLAHE (disabled: PaddleOCR handles internally)
-    sharpen: false              # unsharp mask (disabled: can cause artifacts)
-    remove_color: false         # Florida orange logo inpainting
-
-  postprocessing:
-    use_whitelist: true
-    whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    min_confidence: 0.40        # reject results below this
-    min_text_length: 3          # reject very short reads
-    max_text_length: 10         # reject very long reads (likely misdetections)
-
-  performance:
-    use_tensorrt: true
-    precision: "FP16"
-    batch_timeout_ms: 50        # wait up to 50ms to fill a batch
-    max_batch_size: 8
-
-  fallback:
-    enabled: false
-    provider: "tesseract"       # tesseract or easyocr
-```
-
-### Tuning tips
-
-| Symptom | Adjustment |
+| Method | Description |
 |---|---|
-| Too many false reads | Raise `min_confidence` (e.g. 0.55) |
-| Missing low-quality plates | Lower `min_confidence` (e.g. 0.30) |
-| Short fragments like "AB" passing | Raise `min_text_length` to 5–6 |
-| Distant cameras miss plates | Lower `min_plate_height` to 32 |
-| Florida logo misread as 'C'/'O' | Enable `remove_color: true` |
-| Blurry video stream | Enable `sharpen: true`, or switch to `EnhancedOCRService` |
+| `recognize_plate_crop(crop)` | Takes BGR numpy array, returns `(text, conf)` or `None`. Used by the async executor. |
+| `read(crop)` | Same input, returns `OCRResult` with `.text`, `.confidence`, `.source`. |
+| `warmup(iterations=1)` | Pre-warms PaddleOCR to avoid cold-start on first real frame. |
 
----
-
-## Preprocessing Deep Dive
-
-All preprocessing is applied to grayscale. Images are returned as 3-channel BGR because PaddleOCR expects BGR input.
+### Processing pipeline
 
 ```
 plate crop (BGR)
     │
-    ├── [optional] Florida orange mask + inpaint (HSV color segmentation)
+    ▼
+Upscale if height < 50px (INTER_CUBIC)
     │
     ▼
-grayscale conversion
-    │
-    ├── upscale if height < min_plate_height (INTER_CUBIC)
-    │
-    ├── add 10px white border (helps OCR at edges)
-    │
-    ├── CLAHE (clipLimit=2.0, tileGrid=8×8)
-    │
-    ├── fast NL-means denoising (h=10, templateWindow=7, searchWindow=21)
-    │
-    └── [optional] unsharp mask (Laplacian kernel, weight 1.5/-0.5)
+Add 10px white border
     │
     ▼
-BGR conversion → passed to PaddleOCR
+Strategy 1: CLAHE + NL-means denoise
+Strategy 2: Adaptive threshold (auto-invert if dark)
+Strategy 3: CLAHE + sharpen (Laplacian)
+    │
+    ▼ (each strategy → PaddleOCR)
+    │
+    ▼
+Select best result by confidence
+    │
+    ▼
+Normalize: uppercase, strip non-alphanumeric
+    │
+    ▼
+Florida pattern check → +0.10 confidence boost if valid
+    │
+    ▼
+(text, confidence)
 ```
+
+### Florida pattern validation
+
+```
+ABC1234   ← 3 letters + 4 digits (standard)
+ABCD12    ← 3 letters + letter + 2 digits (specialty)
+123ABC    ← 3 digits + 3 letters (older format)
+AB12CD    ← 2+2+2
+```
+
+Any result matching a pattern gets a +0.10 confidence boost on top of PaddleOCR's raw score.
+
+### Character correction
+
+Position-aware substitutions for the standard `ABC1234` format:
+
+| Position | Expected | Common misread | Correction |
+|---|---|---|---|
+| 1–3 (letter region) | Letter | `0→O`, `1→I`, `8→B` | digit → letter |
+| 4–7 (digit region) | Digit | `O→0`, `I→1`, `B→8`, `G→6`, `S→5`, `Z→2` | letter → digit |
 
 ---
 
-## Output: `PlateDetection`
+## CRNNOCRService (ready, not deployed)
 
-Both `PaddleOCRService` and `EnhancedOCRService` return a `PlateDetection` from `shared/schemas/event.py`:
+**File:** `edge_services/ocr/crnn_ocr_service.py`
+
+A lightweight CRNN model exported to ONNX. Fully thread-safe (`onnxruntime.InferenceSession`), faster than PaddleOCR (~5–20ms vs ~200ms), and works correctly with `ThreadPoolExecutor`.
+
+**Not currently deployed** because the CRNN requires 500+ labeled real plate crops to converge and we have ~58 today. The training pipeline is fully built — see `docs/services/OCR/ocr-training-guide.md`.
+
+To deploy when ready:
 
 ```python
-@dataclass
-class PlateDetection:
-    text: str           # "ABC1234"
-    confidence: float   # 0.87
-    bbox: BoundingBox   # original crop coordinates in the full frame
-    raw_text: str       # "ABC1234[preprocessed]" — strategy name appended for debug
-```
+# In pilot.py — swap PlateOCR for CRNNOCRService
+from ocr.crnn_ocr_service import CRNNOCRService
 
-`PlateOCR.read()` returns an `OCRResult` (defined in `plate_ocr.py`) instead, since it is used standalone without a full-frame bbox.
+self.ocr = CRNNOCRService(
+    model_path="models/crnn_florida/florida_plate_ocr.onnx",
+    use_gpu=True,
+)
+self.ocr_min_confidence = 0.50
+self.ocr_max_confidence_target = 0.80
+```
 
 ---
 
 ## Performance on Jetson Orin NX
 
-Approximate latencies (single plate crop, GPU, FP16):
-
-| Class | Typical latency |
-|---|---|
-| `PaddleOCRService` (strategy 1 only) | ~15–25 ms |
-| `PaddleOCRService` (all 3 strategies) | ~40–60 ms |
-| `EnhancedOCRService` (5 strategies) | ~80–120 ms |
-| `PlateOCR` (PaddleOCR + EasyOCR) | ~100–150 ms |
-
-Batch processing with `recognize_plates_batch()` amortizes overhead — processing 4 plates together is faster than 4 sequential `recognize_plate()` calls.
-
-**Warmup:** Always call `.warmup()` before the first real inference. PaddleOCR JIT-compiles on first run; warmup prevents a 2–5 second stall on the first frame.
-
----
-
-## Troubleshooting
-
-**OCR returns nothing on valid plates**
-
-- Check `min_confidence` — may be too high for the camera quality; try 0.30
-- Check plate height: crops < 48 px are hard for any OCR engine; adjust camera angle or zoom
-
-**Plates read incorrectly (O/0, I/1 confusion)**
-
-- Use `PlateOCR` with Florida pattern validation — the character correction tables handle the most common substitution errors
-- Or enable `EnhancedOCRService` with majority voting
-
-**High CPU/GPU load**
-
-- Ensure `use_gpu: true` in config; PaddleOCR silently falls back to CPU if GPU is unavailable
-- Reduce `rec_batch_num` if GPU memory is tight
-- Use `PaddleOCRService` with `enable_tensorrt=True` after exporting the PaddleOCR model to TensorRT
-
-**EasyOCR import error**
-
-- `PlateOCR` gracefully degrades to PaddleOCR-only if EasyOCR is not installed
-- Install: `pip install easyocr`
-
----
-
-## Known Issues & Pitfalls
-
-### PaddleOCR is not thread-safe (DO NOT run async)
-
-**Symptom:** Moving OCR to a `ThreadPoolExecutor` background thread causes all OCR futures to silently return `None`. The `track_ocr_cache` stays empty, no plate text appears in the display, but plate bounding boxes are still drawn (YOLO detection unaffected).
-
-**Root cause:** PaddleOCR's Paddle inference C++ backend is not safe to call from a non-main thread. The call raises an internal exception that is swallowed by `fut.result()` inside the `except Exception` handler, making it appear like OCR ran but found nothing.
-
-**What was tried:**
-```python
-# DOES NOT WORK — Paddle inference fails silently in worker thread
-self.ocr_executor = ThreadPoolExecutor(max_workers=1)
-self.ocr_executor.submit(lambda: self.ocr.recognize_plate(...))
-```
-
-**Fix:** Keep OCR synchronous. The existing `should_run_ocr()` throttling in `pilot.py` already limits OCR to at most `ocr_max_attempts` calls per track and skips tracks that don't yet have 2+ stable frames — so synchronous OCR at ~200ms does not block the pipeline at a meaningful rate.
-
-**If async is ever needed:** use a thread-safe OCR engine (see section below) rather than switching to `multiprocessing`. Multiprocessing adds IPC overhead and complicates model lifecycle management.
-
----
-
-### Thread-safe OCR engines for async use
-
-Async `ThreadPoolExecutor` gave noticeably better FPS because YOLO detection was never blocked by OCR. These engines are thread-safe and can restore that benefit:
-
-#### Option 1 — `fast-plate-ocr` (**TESTED — do not use for Florida plates**)
-
-ONNX Runtime-backed recognizer trained on global license plates. Thread-safe and fast (~11–14ms), but **completely misreads Florida plates**. The `global-plates-mobile-vit-v2-model` was not trained on Florida plate designs and has no concept of the Sunshine State citrus graphic layout.
-
-**Test results on real Florida plate crops (2026-02-25):**
-
-| Plate | fast-plate-ocr read | PaddleOCR read | Actual |
+| Engine | Latency | Mode | Notes |
 |---|---|---|---|
-| `HYUL84` | `B4W557S` | `HYUEL84` | `HYUL84` |
-| `LLKD78` | `JZG90` | `LLKD78` | `LLKD78` |
-| `O6DAYV` | `GC30N` | `O6DAWV` | `O6DAYV` |
+| `PlateOCR` (PaddleOCR, 3 strategies) | ~600–900ms | Async | Doesn't block YOLO; result arrives next frame |
+| `CRNNOCRService` (ONNX, CPU) | ~30ms | Async | CUDA EP unavailable in this Jetson ONNX build |
+| `CRNNOCRService` (ONNX, GPU) | ~5–10ms | Async | Once CUDA EP available or TensorRT export |
 
-PaddleOCR's worst result was 1–2 character errors (mostly the orange logo leaking through). `fast-plate-ocr` was completely unrecognizable on every plate tested.
+PaddleOCR runs at ~200ms per strategy × 3 strategies ≈ 600ms total. At 15 FPS (67ms/frame) this means OCR results lag the current frame by ~9 frames — acceptable for gate/parking use cases.
 
-**API note (v1.0+):** The class name changed. The correct import is:
+---
+
+## Confidence scores
+
+PaddleOCR's confidence is not well-calibrated for plate crops — it often returns 0.90–1.00 even for incorrect reads. The effective threshold in pilot.py is:
 
 ```python
-from fast_plate_ocr import LicensePlateRecognizer   # NOT ONNXPlateRecognizer
-
-reader = LicensePlateRecognizer("global-plates-mobile-vit-v2-model")
-text = reader.run(plate_crop_grayscale)   # expects 1-channel (grayscale) input
+self.ocr_min_confidence = 0.40   # accept almost all reads
+self.ocr_max_confidence_target = 0.75  # stop re-running OCR once this is hit
 ```
 
-Also note: `fast-plate-ocr` pip install pulls in NumPy 2.x which breaks Jetson's PyTorch build (compiled against NumPy 1.x). If installed, run `pip install "numpy<2"` immediately after.
+The Florida pattern boost (+0.10) helps the useful reads rise slightly above noise, but confidence alone is not a reliable quality signal with PaddleOCR. Per-track accumulation (re-running OCR on the same plate across multiple frames) is the real quality mechanism.
 
-**Verdict:** Skip for Florida deployments. May be viable if a Florida-specific model is trained and exported to ONNX format (see Option 3).
+---
 
-| Property | Value |
-|---|---|
-| Thread-safe | ✅ ONNX Runtime |
-| Latency | ~11–14ms per plate |
-| GPU required | No (fast on CPU) |
-| Florida plate accuracy | ❌ Completely wrong |
-| Jetson packaging | Standard pip (NumPy conflict — see above) |
-
-#### Option 2 — EasyOCR recognition-only (already installed)
-
-EasyOCR is PyTorch-based and therefore thread-safe. 90% of its 700ms cost in earlier tests was the **detection** step. Since YOLO already provides cropped plates, detection can be skipped entirely using `reader.recognize()`:
+## Async pattern in pilot.py
 
 ```python
-import easyocr
+# Top of process_frame — collect previous results
+for track_id, fut in list(self.track_ocr_futures.items()):
+    if not fut.done():
+        continue
+    del self.track_ocr_futures[track_id]
+    result = fut.result()
+    if result:
+        text, conf = result
+        # ... update cache, publish event
 
-reader = easyocr.Reader(['en'], gpu=True, verbose=False)
-
-# SLOW — runs detect + recognize on the full image (~700ms)
-# result = reader.readtext(plate_crop)
-
-# FAST — skips detection, recognition only on pre-cropped plate (~80–150ms)
-result = reader.recognize(plate_crop)
-```
-
-| Property | Value |
-|---|---|
-| Thread-safe | ✅ PyTorch |
-| Latency | ~80–150ms (recognition only) |
-| GPU | ✅ Already working on Orin NX |
-| Already installed | ✅ |
-
-#### Option 3 — ONNX Runtime + custom CRNN
-
-Any CRNN model exported to ONNX can be served via `onnxruntime.InferenceSession`, which is thread-safe and supports the CUDA execution provider on Jetson. Useful if a fine-tuned Florida-plate CRNN is trained later.
-
-```python
-import onnxruntime as ort
-
-sess = ort.InferenceSession("plate_crnn.onnx", providers=["CUDAExecutionProvider"])
-# sess.run() is thread-safe
-```
-
-#### Implementation note
-
-When restoring async OCR, the `crop.copy()` pattern from the previous attempt is correct — always copy the frame crop before submitting to the executor so the main loop can advance the frame buffer safely:
-
-```python
+# Later — submit new jobs
 crop = frame[y1:y2, x1:x2].copy()   # copy before submit
-future = executor.submit(ocr_fn, crop, bbox, attempt)
-track_ocr_futures[track_id] = future
+self._ocr_future_bboxes[track_id] = plate_bbox
+fut = self.ocr_executor.submit(self.ocr.recognize_plate_crop, crop)
+self.track_ocr_futures[track_id] = fut
 ```
 
-Collect completed futures at the top of the next frame's OCR block, not inside the submission loop.
+Key points:
+- `crop.copy()` is required — the frame buffer advances while OCR runs in the background
+- `max_workers=1` — only one PaddleOCR call at a time (not concurrency-safe with multiple workers)
+- Futures are collected at the **top** of the next frame, not inside the submission loop
 
 ---
 
-### EasyOCR (PlateOCR) is too slow for real-time use on Jetson
+## Known issues
 
-**Symptom:** Switching `pilot.py` to `PlateOCR` (EasyOCR + PaddleOCR ensemble) causes plate crop count to drop dramatically. Even with GPU, EasyOCR takes ~700ms per inference call on the Orin NX.
+### PaddleOCR confidence inflation
 
-**Root cause:** EasyOCR is accurate but not optimized for Jetson. At 700ms per call, it blocks the frame loop, starving YOLO of frames.
+PaddleOCR reports 0.90–1.00 confidence on many incorrect reads. Do not rely on confidence alone to gate plate events. Use the `ocr_max_attempts` limit and per-track caching instead.
 
-**Fix:** Use `PaddleOCRService` (synchronous, ~200ms, 3 strategies) as the primary OCR engine. EasyOCR can be used offline for post-processing or validation but not in the real-time loop.
+### Florida orange logo
 
----
-
-### Florida orange logo breaks character segmentation
-
-**Symptom:** OCR reads garbage in the middle section of the plate (e.g. `OCP🍊4B0` → `OCPEHED`). The orange Sunshine State graphic between the letter and number groups is detected as characters.
-
-**Fix:** Enable `remove_color: true` in `config/ocr.yaml`. This masks the orange HSV region (hue 5–25°) and inpaints it with surrounding pixels before OCR runs, eliminating the false character detections.
+The Sunshine State citrus graphic between letter and number groups can be detected as a character (often read as `C`, `O`, or garbage). To remove it:
 
 ```yaml
+# config/ocr.yaml
 preprocessing:
-  remove_color: true   # Required for Florida plates
+  remove_color: true   # masks HSV orange (hue 5–25°) and inpaints before OCR
 ```
+
+Disabled by default — adds ~20ms per crop and is not always necessary.
+
+### EasyOCR not suitable for real-time plate crops
+
+EasyOCR was tested as a second vote (`use_easyocr=True`). Results on plate crops were poor — its CRAFT text detector splits plate numbers into fragments or misses regions entirely. EasyOCR is disabled (`use_easyocr=False`). Do not re-enable without re-testing on representative crops.
+
+### ONNX CUDA EP not available
+
+This Jetson's `onnxruntime` package was built without the CUDA Execution Provider. `CRNNOCRService` falls back to CPU (~30ms). Still fast enough for async use but not as fast as a GPU-enabled build.
 
 ---
 
 ## Related
 
-- `edge_services/detector/` — YOLO plate detector that produces bounding boxes fed into OCR
-- `edge_services/event_processor/` — Consumes `PlateDetection` results and publishes Kafka events
-- `shared/schemas/event.py` — `BoundingBox` and `PlateDetection` dataclasses
-- `config/ocr.yaml` — Full configuration reference
-- `docs/alpr/project-architecture-charts.md` — System-level pipeline diagram
+- `docs/services/OCR/ocr-training-guide.md` — How to train the CRNN model once crops are collected
+- `edge_services/ocr/crnn_ocr_service.py` — Thread-safe CRNN service (deploy when trained)
+- `data/ocr_training/labels.txt` — 58 labeled crops; target 500+ for CRNN training
+- `output/crops/` — Live plate crops saved by pilot.py (accumulate over time)
+- `scripts/ocr/` — Label, train, and evaluate scripts

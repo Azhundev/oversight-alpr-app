@@ -398,6 +398,16 @@ class PlateOCR:
             raw_text=result.raw_text,
         )
 
+    def recognize_plate_crop(self, crop: np.ndarray) -> Optional[tuple]:
+        """
+        Adapter matching CRNNOCRService interface for async ThreadPoolExecutor use.
+        Returns (text, confidence) or None.
+        """
+        result = self.read(crop)
+        if result is None:
+            return None
+        return (result.text, result.confidence)
+
     def warmup(self, iterations: int = 3):
         """Warm up OCR engines."""
         logger.info("Warming up PlateOCR...")

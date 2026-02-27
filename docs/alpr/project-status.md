@@ -1,6 +1,6 @@
 # OVR-ALPR Project Status
 
-**Last Updated:** 2026-02-03
+**Last Updated:** 2026-02-26
 
 This document provides a snapshot of the current implementation status, showing what's working, what's in progress, and what's planned next.
 
@@ -60,16 +60,15 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
   - Track state management (NEW, TRACKED, LOST, REMOVED)
 
 #### 4. OCR Service ✅
-- **File:** `services/ocr/ocr_service.py`
-- **Status:** Production-ready with optimizations
+- **File:** `edge_services/ocr/plate_ocr.py` (`PlateOCR`)
+- **Status:** Production — PaddleOCR async via ThreadPoolExecutor
 - **Features:**
-  - PaddleOCR GPU acceleration
-  - Per-track throttling (run ONCE per track)
-  - Multi-strategy preprocessing
-  - Florida orange logo removal
-  - Adaptive image enhancement (CLAHE, denoise, sharpen)
-  - Best-shot selection based on quality
-  - Batch processing support
+  - PaddleOCR GPU acceleration, 3 preprocessing strategies
+  - Async via `ThreadPoolExecutor(max_workers=1)` — YOLO never blocked
+  - Per-track throttling and result caching
+  - Florida plate pattern validation (+0.10 confidence boost)
+  - Position-aware character correction (O↔0, I↔1, B↔8, etc.)
+- **Pending:** CRNN model (needs 500+ labeled crops) — see `docs/services/OCR/ocr-training-guide.md`
 
 #### 5. Event Processing & Validation ✅
 - **File:** `services/event_processor/event_processor_service.py`
@@ -246,6 +245,7 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
 - ✅ `config/cameras.yaml` - Camera definitions
 - ✅ `config/tracking.yaml` - ByteTrack parameters
 - ✅ `config/ocr.yaml` - PaddleOCR settings
+- ✅ `config/model_sync.yaml` - Model sync agent (poll interval, models to track, restart behavior)
 
 ### Monitoring & Observability Stack
 
@@ -442,8 +442,8 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
 - **Container:** `alpr-mlflow`
 - **Status:** Production-ready
 - **Features:**
-  - MLflow 2.9.2 server at localhost:5000
-  - Model versioning with stages (None, Staging, Production, Archived)
+  - MLflow 3.x server at localhost:5000
+  - Model versioning with alias-based promotion (`champion`, `challenger`)
   - Experiment tracking with metrics and parameters
   - Artifact storage in MinIO (alpr-mlflow-artifacts bucket)
   - Backend store in TimescaleDB (mlflow_db)
@@ -454,6 +454,20 @@ The system is currently in **Phase 4 COMPLETE** with a full enterprise architect
 - **Registered Models:**
   - `alpr-vehicle-detector`: YOLOv11 vehicle detection
   - `alpr-plate-detector`: Custom license plate detection
+
+#### 30. Model Sync Agent ✅
+- **File:** `edge_services/model_sync/model_sync_agent.py`
+- **Status:** Production-ready (background service)
+- **Purpose:** Automatic model distribution to 10+ Jetson edge devices
+- **Features:**
+  - Polls MLflow `champion` alias every N minutes (default: 60 min)
+  - Downloads new model versions to `models/staging/`, validates, then atomic swap to `models/`
+  - Updates `models/manifest.json` with version and run_id per model
+  - Triggers `systemctl restart alpr-pilot`; falls back to SIGTERM if no sudo
+  - Offline-resilient: logs warning and skips cycle if MLflow unreachable
+  - Status HTTP endpoint at `GET http://localhost:8005/status`
+  - Systemd unit: `scripts/systemd/alpr-model-sync.service`
+- **Configuration:** `config/model_sync.yaml`
 
 ---
 
@@ -513,7 +527,7 @@ None - All Phase 4 features (Priorities 1-7) are fully implemented. Phase 4 is C
 | **Streams per Device (RTSP)** | 4-6 | With GPU hardware decode + OCR |
 | **Streams per Device (Video)** | 1-2 | With CPU decode + OCR |
 | **Detection Latency** | 20ms | Vehicle + Plate (TensorRT) |
-| **OCR Latency** | 10-30ms | Per plate (throttled) |
+| **OCR Latency** | ~600–900ms async | Per plate (3 strategies, doesn't block YOLO) |
 | **Tracking Overhead** | <1ms | ByteTrack is lightweight |
 | **End-to-end Latency** | 40-90ms | Frame capture to Kafka |
 | **CPU Usage** | 40-60% | With TensorRT optimization |
@@ -554,11 +568,13 @@ OVR-ALPR/
 ├── config/                           # ✅ YAML configurations
 │   ├── cameras.yaml
 │   ├── tracking.yaml
-│   └── ocr.yaml
+│   ├── ocr.yaml
+│   └── model_sync.yaml               # Model sync agent config
 │
 ├── models/                           # ✅ YOLO models
 │   ├── yolo11n.pt                    # Vehicle detection
-│   └── yolo11n-plate.pt              # Plate detection
+│   ├── yolo11n-plate.pt              # Plate detection
+│   └── manifest.json                 # Model version manifest (written by sync agent)
 │
 ├── services/                         # ✅ All services implemented
 │   ├── camera/
@@ -569,7 +585,9 @@ OVR-ALPR/
 │   ├── tracker/
 │   │   └── bytetrack_service.py      # ✅ Multi-object tracking
 │   ├── ocr/
-│   │   └── ocr_service.py            # ✅ PaddleOCR
+│   │   ├── plate_ocr.py              # ✅ Active — PlateOCR (PaddleOCR async)
+│   │   ├── crnn_ocr_service.py       # ⏳ Ready — deploy when 500+ labels collected
+│   │   └── ocr_service.py            # Superseded — kept for reference
 │   ├── event_processor/
 │   │   ├── event_processor_service.py# ✅ Validation + dedup
 │   │   ├── kafka_publisher.py        # ✅ Event publishing (JSON)
@@ -615,7 +633,12 @@ OVR-ALPR/
 │   ├── detector/                     # Detection services
 │   ├── tracker/                      # Tracking services
 │   ├── ocr/                          # OCR services
-│   └── event_processor/              # Event processing
+│   │   ├── plate_ocr.py              # ✅ Active — PlateOCR (PaddleOCR, async)
+│   │   ├── crnn_ocr_service.py       # ⏳ Ready — deploy when 500+ labels collected
+│   │   └── ocr_service.py            # Superseded — kept for reference
+│   ├── event_processor/              # Event processing
+│   └── model_sync/                   # ✅ Model distribution agent
+│       └── model_sync_agent.py       # Poll MLflow, download, validate, restart pilot
 │
 ├── schemas/                          # ✅ Avro schemas
 │   └── plate_event.avsc              # PlateEvent schema definition
@@ -624,7 +647,14 @@ OVR-ALPR/
 │   ├── init_db.sql                   # Database initialization
 │   ├── add_created_at_index.sql      # Performance optimization
 │   ├── register_schemas.py           # Schema Registry setup
-│   └── test_schema_registry.py       # Integration tests
+│   ├── test_schema_registry.py       # Integration tests
+│   ├── systemd/                      # Systemd unit files
+│   │   ├── alpr-pilot.service        # pilot.py service (Restart=always)
+│   │   └── alpr-model-sync.service   # Model sync agent service
+│   └── ocr/                          # OCR training scripts
+│       ├── extract_crops_from_video.py # Extract plate crops from MOV files
+│       ├── label_crops.py            # Interactive labeling tool
+│       └── train_crnn.py             # CRNN model training
 │
 ├── output/                           # Runtime output
 │   └── crops/                        # Plate crops by date
@@ -657,6 +687,22 @@ OVR-ALPR/
 None currently - system is stable in production testing.
 
 ### Recent Enhancements
+
+- ✅ **2026-02-26:** **Model Sync Agent + OCR Cleanup**
+  - Model Sync Agent deployed (`edge_services/model_sync/model_sync_agent.py`)
+    - Polls MLflow `champion` alias every 60 min; downloads, validates, and atomic-swaps new models
+    - Updates `models/manifest.json` with version/run_id per model
+    - Triggers `systemctl restart alpr-pilot`; SIGTERM fallback if no sudo
+    - Offline-resilient: keeps existing models if MLflow unreachable
+    - Status endpoint: `GET http://localhost:8005/status`
+    - Systemd units: `alpr-pilot.service` + `alpr-model-sync.service`
+  - EasyOCR disabled (`use_easyocr=False`) — poor accuracy on plate crops, adds latency
+  - OCR now uses PaddleOCR only with 3 preprocessing strategies (~600–900ms async)
+  - Training data: 58 labeled real plate crops; CRNN held until 500+ collected
+  - Datasets folder cleaned: removed YOLO training datasets (~161MB freed), kept `datasets/calibration/`
+  - MLflow API updated to 3.x (`get_model_version_by_alias()` replaces stage-based API)
+  - Training pipeline scripts: `scripts/ocr/extract_crops_from_video.py`, `label_crops.py`, `train_crnn.py`
+  - Documentation: `docs/services/OCR/ocr-service.md` and `ocr-training-guide.md` updated
 
 - ✅ **2026-02-03:** **Distributed Tracing (Tempo) Complete** - Full observability with distributed tracing (Phase 6 MLOps - Distributed Tracing COMPLETE ✨)
   - Grafana Tempo deployed via Docker Compose (localhost:3200)

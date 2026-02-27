@@ -1,343 +1,255 @@
 # OCR Training Guide
 
-Training a custom OCR model on real Florida plate crops to improve accuracy and restore async threading.
+How to retrain the CRNN OCR model once you have enough labeled plate crops.
 
 ---
 
-## Why train a custom model?
+## Current state
 
-PaddleOCR's `en_PP-OCRv4_rec` is a general-purpose recognizer. It was not trained on Florida plates and does not know:
-- The Sunshine State orange citrus graphic sits between the letter and number groups
-- The font and spacing specific to Florida DMV plates
-- Common character confusion patterns on Florida plates (e.g. `D`/`0`, `Y`/`V`)
+The system currently uses `PlateOCR` (PaddleOCR + EasyOCR ensemble) running async in a background thread. It works but accuracy is limited — PaddleOCR was not trained on Florida plates.
 
-A model fine-tuned on real Florida plate crops fixes these issues at the source rather than patching them in post-processing.
-
-### Bonus: solves the async threading problem
-
-PaddleOCR is not thread-safe (see `ocr-service.md` → Known Issues). The recommended training target is a **CRNN exported to ONNX**, which runs via `onnxruntime.InferenceSession`. ONNX Runtime is explicitly thread-safe, so training a custom model also restores `ThreadPoolExecutor` async OCR and the FPS improvement that came with it.
+The CRNN training pipeline is fully built and ready. Once you have **500+ labeled real plate crops**, you can train a faster, more accurate, fully thread-safe CRNN model and replace PlateOCR.
 
 ---
 
-## Three-step workflow
+## Where crops come from
+
+Every plate detected by YOLO is saved automatically to:
 
 ```
-Plate crops (output/crops/)
-         │
-         ▼  Step 1
-    Label crops
-    (type the correct plate text for each image)
-         │
-         ▼  Step 2
-    Train CRNN → export to ONNX
-    (or fine-tune PaddleOCR rec model)
-         │
-         ▼  Step 3
-    Register in MLflow → model sync agent distributes to all devices
+output/crops/YYYY-MM-DD/
+    CAM1_trackN.jpg    ← one file per tracked vehicle, overwritten if a better frame comes in
+```
+
+The filename is stable per track — if the detector sees the same car for 10 frames, only the best-quality crop is kept. Let the system run for a few days/weeks to accumulate crops naturally.
+
+```bash
+# Count crops collected so far
+find output/crops -name "*.jpg" | wc -l
 ```
 
 ---
 
 ## Step 1 — Label the crops
 
-### What you need
-
-- Plate crop images in `output/crops/`
-- The correct plate text for each image
-
-### Label format
-
-A plain text file with one entry per line:
-
-```
-output/crops/2026-02-26/CAM1_track99.jpg	HYUL84
-output/crops/2026-02-26/CAM1_track142.jpg	LLKD78
-output/crops/2026-02-26/CAM1_track164.jpg	O6DAYV
-```
-
-Tab-separated: `image_path<TAB>plate_text`. This is compatible with both PaddleOCR's training format and the custom CRNN pipeline.
-
-### Labeling script
+### Run the labeling tool
 
 ```bash
-python scripts/ocr_training/label_crops.py \
+python3 scripts/ocr/label_crops.py \
     --crops-dir output/crops \
-    --output labels.txt
+    --output data/ocr_training/labels.txt
 ```
 
-The script shows each crop in a window, you type the plate text, press Enter. Press `s` to skip an unreadable image. Resumes from where you left off if interrupted.
+The script skips crops already in `labels.txt`, so you can run it repeatedly as new crops accumulate and it will only show new ones.
 
-### How many labels?
+### Hotkeys
 
-| Count | Expected outcome |
+| Key | Action |
 |---|---|
-| 50–100 | Visible improvement on the specific plates seen |
-| 200–300 | Reliable improvement across Florida plate styles |
-| 500+ | Production-quality results |
+| Type characters | Build the plate text |
+| `Enter` | Save label and move to next |
+| `Escape` | Skip (mark as `__SKIP__`) |
+| `Ctrl+Q` | Save and quit |
+| `[` | Go back one image |
 
-57 crops (current) is enough to start and measure improvement. Keep the system running to collect more.
+> **Note:** `Q` and `S` are valid plate characters — they are NOT hotkeys.
 
-### Tips for labeling
+### Labeling rules
 
-- Type only the characters visible on the plate (`A–Z`, `0–9`), no spaces or dashes
-- If you can't read it confidently, press `s` to skip — bad labels hurt training
-- The orange logo is not a character; ignore it
-- If PaddleOCR got it almost right (e.g. `HYUEL84` for `HYUL84`), still label the correct text
+- Type only what's on the plate: letters `A–Z` and digits `0–9`, no spaces or dashes
+- Skip blurry, angled, or unreadable crops with `Escape` — bad labels hurt more than no labels
+- If PaddleOCR pre-labeled it incorrectly, just retype the correct text
+- The orange Florida logo/graphic between letters and numbers is not a character — ignore it
+
+### How many labels to collect
+
+| Labels | Expected outcome |
+|---|---|
+| < 100 | CRNN will not converge — stick with PlateOCR |
+| 200–300 | CRNN may converge; limited character coverage |
+| 500+ | Reliable convergence, good accuracy |
+| 1000+ | Production-quality results |
+
+This is higher than typical OCR guides suggest because CRNN uses CTC loss and must learn character features **from scratch** (no pre-trained backbone). With fewer than ~500 samples, the model collapses to predicting blanks for every input — a known CTC failure mode.
 
 ---
 
-## Step 2 — Train
+## Step 2 — Review and filter labels
 
-Two options. **Option B (CRNN + ONNX) is recommended** because the result is thread-safe.
-
----
-
-### Option A — Fine-tune PaddleOCR recognition model
-
-Fine-tunes `en_PP-OCRv4_rec` on your labeled Florida plate crops. Uses the existing PaddleOCR inference path in `pilot.py` — no code changes needed after training.
-
-**Limitations:**
-- Requires PaddlePaddle training environment (separate from inference)
-- Output model is not thread-safe (same limitation as today)
-- More complex setup than Option B
-
-**Setup:**
+Before training, check for contamination. The main risk is the YOLO plate detector occasionally labels non-plate objects (signs, logos) as plates.
 
 ```bash
-pip install paddlepaddle-gpu  # training-only dependency
-git clone https://github.com/PaddlePaddle/PaddleOCR
-cd PaddleOCR
+# Check what's in labels.txt
+python3 -c "
+lines = open('data/ocr_training/labels.txt').readlines()
+real = [l.split('\t') for l in lines if '\t' in l and '__SKIP__' not in l]
+print(f'Labeled: {len(real)}, Skipped: {lines.count(chr(9).join([l.split(chr(9))[0], \"__SKIP__\"]))}')
+for p, t in real[:20]:
+    print(f'  {t.strip():12s}  {p.split(\"/\")[-1].strip()}')
+"
 ```
 
-**Data preparation:**
+Signs to watch for in the label list:
+- Words like `RESERVED`, `SUITE`, `EXIT`, `PARKING` — from parking garage footage
+- Labels with no digits (real plates always have digits)
+- Labels longer than 8 characters
+
+If you find sign contamination, open the labeling tool in review mode to correct them:
 
 ```bash
-# Convert labels.txt to PaddleOCR format
-python scripts/ocr_training/prepare_paddle_dataset.py \
-    --labels labels.txt \
-    --output-dir data/paddle_ocr/ \
-    --val-split 0.15
-```
-
-PaddleOCR expects:
-```
-data/paddle_ocr/
-  train/
-    images/       ← symlinks or copies of crop images
-    train_list.txt   ← "images/CAM1_track99.jpg	HYUL84"
-  val/
-    images/
-    val_list.txt
-```
-
-**Training config (`configs/rec/PP-OCRv4/en_PP-OCRv4_rec_fine_tune.yml`):**
-
-Key settings to modify:
-```yaml
-Global:
-  pretrained_model: ./pretrain_models/en_PP-OCRv4_rec_train/best_accuracy
-  character_dict_path: ppocr/utils/en_dict.txt
-  max_text_length: 10
-
-Train:
-  dataset:
-    data_dir: ./data/paddle_ocr/train/
-    label_file_list: ["./data/paddle_ocr/train/train_list.txt"]
-  loader:
-    batch_size_per_card: 32
-    num_workers: 4
-
-Eval:
-  dataset:
-    data_dir: ./data/paddle_ocr/val/
-    label_file_list: ["./data/paddle_ocr/val/val_list.txt"]
-```
-
-**Train:**
-
-```bash
-python tools/train.py -c configs/rec/PP-OCRv4/en_PP-OCRv4_rec_fine_tune.yml
-```
-
-**Export and copy:**
-
-```bash
-python tools/export_model.py \
-    -c configs/rec/PP-OCRv4/en_PP-OCRv4_rec_fine_tune.yml \
-    -o Global.pretrained_model=output/rec_ppocr_v4/best_accuracy \
-       Global.save_inference_dir=inference/florida_rec
-
-cp -r inference/florida_rec models/florida_rec/
-```
-
-Update `config/ocr.yaml`:
-```yaml
-ocr:
-  paddle:
-    rec_model_dir: "models/florida_rec"   # override default model
+python3 scripts/ocr/label_crops.py \
+    --crops-dir output/crops \
+    --output data/ocr_training/labels.txt \
+    --review
 ```
 
 ---
 
-### Option B — CRNN + ONNX (recommended)
+## Step 3 — Pre-label new crops with PaddleOCR (optional speedup)
 
-Trains a lightweight CRNN (Convolutional Recurrent Neural Network) on your labeled crops, exports to ONNX, and registers it in MLflow. The resulting model:
-
-- Runs via `onnxruntime.InferenceSession` → **thread-safe**
-- ~5–20ms inference → **faster than PaddleOCR**
-- Deployable via the model sync agent to all edge devices
-- Works with `ThreadPoolExecutor` async OCR (restores FPS)
-
-**Architecture:**
-
-```
-plate crop (grayscale, resized to 32×128)
-    │
-    ▼
-CNN feature extractor (MobileNetV2 backbone, 4 stages)
-    │
-    ▼
-Sequence features (W/4 time steps, 256 channels)
-    │
-    ▼
-BiLSTM (2 layers, 256 hidden units)
-    │
-    ▼
-CTC decoder → plate text
-```
-
-**Training:**
+If you have hundreds of new unlabeled crops, run PaddleOCR over them first so you only need to correct errors rather than type everything from scratch:
 
 ```bash
-python scripts/ocr_training/train_crnn.py \
-    --labels labels.txt \
-    --output-dir models/crnn_florida/ \
-    --epochs 100 \
-    --batch-size 32 \
-    --val-split 0.15
+python3 scripts/ocr/prelabel_with_paddleocr.py \
+    --crops-dir output/crops \
+    --output data/ocr_training/labels.txt
 ```
 
-The script:
-1. Loads labeled crops
-2. Augments data (small rotations, brightness/contrast jitter, slight blur)
-3. Trains with CTC loss
-4. Evaluates character accuracy and full-plate exact-match rate
-5. Exports best checkpoint to `models/crnn_florida/florida_plate_ocr.onnx`
-6. Logs metrics and registers model in MLflow
+Then run `label_crops.py --review` to verify and fix incorrect pre-labels.
 
-**Expected training time on Jetson Orin NX:** ~20–40 min for 200 labeled crops, 100 epochs.
+---
 
-**MLflow registration:**
+## Step 4 — Train
 
 ```bash
-python scripts/ocr_training/train_crnn.py --labels labels.txt --register-mlflow
+python3 scripts/ocr/train_crnn.py \
+    --labels data/ocr_training/labels.txt \
+    --output-dir models/crnn_florida \
+    --epochs 300 \
+    --batch-size 16 \
+    --val-split 0.15 \
+    --patience 100
 ```
 
-The model is registered as `alpr-florida-ocr-crnn` in MLflow. Promote to `champion` to distribute via the model sync agent:
+| Argument | Guidance |
+|---|---|
+| `--epochs` | 200–300 for 500 samples; more epochs don't hurt with early stopping |
+| `--batch-size` | 16–32 depending on available GPU memory |
+| `--val-split` | 0.15 (15% held out for validation); use 0.10 if you have fewer than 300 samples |
+| `--patience` | Early stopping: stop if no improvement for N epochs. 50–100 is reasonable |
+| `--lr` | Default 1e-3 works; try 3e-4 if training is unstable |
+
+Training progress is logged to MLflow at `http://localhost:5000` (if Docker is running).
+
+### What success looks like
+
+```
+Epoch  50/300  loss=0.82  val_loss=0.91  CER=0.12  exact=58%
+Epoch 100/300  loss=0.41  val_loss=0.48  CER=0.06  exact=74%
+Epoch 150/300  loss=0.21  val_loss=0.31  CER=0.03  exact=88%
+```
+
+CER (character error rate) below 10% and exact match above 70% is good enough to switch from PlateOCR.
+
+### What failure looks like
+
+```
+Epoch   1/300  CER=1.000  pred=''  true='RJL469'
+Epoch  50/300  CER=1.000  pred=''  true='RJL469'
+```
+
+Empty predictions throughout = CTC blank collapse. You need more training data. Do not increase epochs — it will not help.
+
+---
+
+## Step 5 — Switch pilot.py to the CRNN model
+
+Once training succeeds, edit `pilot.py`:
+
+```python
+# Replace:
+from ocr.plate_ocr import PlateOCR
+# With:
+from ocr.crnn_ocr_service import CRNNOCRService
+```
+
+And in `__init__`:
+
+```python
+# Replace:
+self.ocr = PlateOCR(use_gpu=True)
+self.ocr.warmup(iterations=1)
+# With:
+self.ocr = CRNNOCRService(
+    model_path="models/crnn_florida/florida_plate_ocr.onnx",
+    use_gpu=True,
+)
+self.ocr.warmup(iterations=3)
+```
+
+And adjust confidence thresholds:
+
+```python
+self.ocr_min_confidence = 0.50   # CRNN uses mean softmax confidence
+self.ocr_max_confidence_target = 0.80
+```
+
+`CRNNOCRService` is thread-safe (onnxruntime backend) so the `ThreadPoolExecutor` async path works correctly with it — unlike PaddleOCR.
+
+---
+
+## Step 6 — Register in MLflow and distribute
 
 ```bash
+# Train and register in one step
+python3 scripts/ocr/train_crnn.py \
+    --labels data/ocr_training/labels.txt \
+    --output-dir models/crnn_florida \
+    --register
+
+# Promote to champion so the model sync agent distributes it
 mlflow models set-model-alias \
     --model-name alpr-florida-ocr-crnn \
     --alias champion \
     --version 1
 ```
 
-**Inference integration:**
-
-```python
-# In pilot.py — thread-safe, can use ThreadPoolExecutor
-import onnxruntime as ort
-import cv2, numpy as np
-
-sess = ort.InferenceSession(
-    "models/crnn_florida/florida_plate_ocr.onnx",
-    providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
-)
-
-def read_plate_onnx(crop_bgr: np.ndarray) -> str:
-    gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
-    img = cv2.resize(gray, (128, 32)).astype(np.float32) / 255.0
-    img = img[np.newaxis, np.newaxis, ...]   # (1, 1, 32, 128)
-    logits = sess.run(None, {"input": img})[0]
-    return ctc_decode(logits)   # greedy CTC decode → plate text string
-```
+The model sync agent picks up the `champion` alias on its next poll and deploys the updated model to all edge devices.
 
 ---
 
-## Step 3 — Deploy
+## Data tips
 
-After training (either option):
+### Crops accumulate automatically
+pilot.py saves every plate detection to `output/crops/`. After a week of operation you may have hundreds of crops without any manual effort.
 
-1. Register the model in MLflow (done automatically by training scripts)
-2. Set the `champion` alias
-3. The model sync agent picks it up on next poll and distributes to all devices
-4. `alpr-pilot` restarts automatically with the new model
+### Label in batches
+Label 50–100 crops at a time. Run the labeling tool, quit, then retrain. Iterative improvement:
 
-See `docs/services/MLFlow/model-sync-agent.md` for the full deployment workflow.
+```
+Collect 100 crops → label → train → measure accuracy
+Collect 100 more  → label → retrain → measure again
+```
+
+### Existing labels are preserved
+The current `data/ocr_training/labels.txt` already has 43 clean labeled plates. New labeling sessions append to this file — you don't lose previous work.
+
+### Extracted YOLO dataset crops
+369 crops were already extracted from `datasets/plate_training_round2` and `datasets/plate_training`. Most were parking signs and are marked `__SKIP__`. The 43 that survived filtering are real plates and are already in `labels.txt`.
 
 ---
 
-## Data strategy
+## Files reference
 
-### Collecting more crops
-
-The system now saves every plate YOLO detects to `output/crops/` (even without a successful OCR read). Let it run for a few days before the next training cycle.
-
-```bash
-# Count available crops
-find output/crops -name "*.jpg" | wc -l
-
-# Open labeling tool
-python scripts/ocr_training/label_crops.py --crops-dir output/crops --output labels.txt
-```
-
-### Augmentation (handled by training script)
-
-With few real images, augmentation multiplies effective dataset size:
-
-| Augmentation | Purpose |
+| File | Purpose |
 |---|---|
-| ±5° rotation | Slightly tilted plates |
-| ±20% brightness | Morning/evening lighting |
-| ±15% contrast | Overcast vs direct sun |
-| Gaussian blur (σ=0.5) | Slightly out-of-focus frames |
-| Horizontal flip | Not applied — flips break plate text |
-
-### Iterative improvement
-
-Train → deploy → collect new crops → label new errors → retrain. Each cycle improves accuracy on the specific plates your cameras see.
-
-```
-Week 1: 57 crops → first model → measure CER (character error rate)
-Week 2: 150 crops → retrain → compare CER
-Week 4: 300 crops → production-quality model
-```
-
----
-
-## Measuring accuracy
-
-```bash
-# Run evaluation on a held-out set
-python scripts/ocr_training/evaluate_ocr.py \
-    --model models/crnn_florida/florida_plate_ocr.onnx \
-    --labels labels_val.txt
-```
-
-Metrics reported:
-- **CER** (character error rate) — fraction of characters wrong
-- **Exact match rate** — fraction of plates read 100% correctly
-- **Per-class confusion matrix** — which characters get confused most often
-
-Target: CER < 5%, exact match > 85% on held-out Florida plates.
-
----
-
-## Related
-
-- `scripts/ocr_training/label_crops.py` — interactive labeling tool (to be created)
-- `scripts/ocr_training/train_crnn.py` — CRNN training + ONNX export (to be created)
-- `scripts/ocr_training/evaluate_ocr.py` — accuracy evaluation (to be created)
-- `docs/services/OCR/ocr-service.md` — OCR service reference, known issues
-- `docs/services/MLFlow/model-sync-agent.md` — model distribution to edge devices
-- `output/crops/` — plate crop images collected by pilot.py
+| `scripts/ocr/label_crops.py` | Interactive labeling tool |
+| `scripts/ocr/prelabel_with_paddleocr.py` | Auto-label with PaddleOCR to speed up review |
+| `scripts/ocr/train_crnn.py` | CRNN training + ONNX export |
+| `scripts/ocr/extract_crops_from_yolo.py` | Extract crops from YOLO-annotated datasets |
+| `data/ocr_training/labels.txt` | Labeled crops (tab-separated path + text) |
+| `data/ocr_training/extracted_crops/` | Crops extracted from YOLO datasets |
+| `models/crnn_florida/florida_plate_ocr.onnx` | Trained CRNN model (replace when retrained) |
+| `edge_services/ocr/crnn_ocr_service.py` | Thread-safe ONNX OCR service for pilot.py |
+| `edge_services/ocr/plate_ocr.py` | PaddleOCR + EasyOCR ensemble (current fallback) |
+| `output/crops/` | Live plate crops collected by pilot.py |
