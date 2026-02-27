@@ -25,7 +25,7 @@ sys.path.insert(0, str(project_root / "core_services"))
 
 from camera.camera_ingestion import CameraManager
 from detector.detector_service import YOLOv11Detector
-from ocr.ocr_service import PaddleOCRService
+from ocr.crnn_ocr_service import CRNNOCRService
 from tracker.bytetrack_service import ByteTrackService, Detection
 from shared.utils.tracking_utils import bbox_to_numpy, get_track_color, draw_track_id
 from event_processor.event_processor_service import EventProcessorService
@@ -124,14 +124,13 @@ class ALPRPilot:
         # Initialize OCR
         self.ocr = None
         if self.enable_ocr:
-            logger.info("Initializing PaddleOCR...")
-            self.ocr = PaddleOCRService(
-                config_path="config/ocr.yaml",
+            logger.info("Initializing CRNN OCR...")
+            self.ocr = CRNNOCRService(
+                model_path="models/crnn_florida/florida_plate_ocr.onnx",
                 use_gpu=True,
-                enable_tensorrt=False,
             )
             logger.info("Warming up OCR...")
-            self.ocr.warmup(iterations=5)
+            self.ocr.warmup(iterations=3)
 
         # Initialize Tracker
         self.tracker = None
@@ -163,9 +162,15 @@ class ALPRPilot:
 
         # OCR throttling parameters (gate scenario)
         self.ocr_min_track_frames = 2  # Wait for stable track
-        self.ocr_min_confidence = 0.70  # Reasonable confidence (model needs retraining if too low)
-        self.ocr_max_confidence_target = 0.90  # Target high confidence
+        self.ocr_min_confidence = 0.50  # CRNN confidence scale differs from PaddleOCR
+        self.ocr_max_confidence_target = 0.80
         self.ocr_max_attempts = 20  # Reasonable attempts
+
+        # Async OCR — CRNNOCRService is thread-safe (onnxruntime)
+        from concurrent.futures import ThreadPoolExecutor
+        self.ocr_executor = ThreadPoolExecutor(max_workers=1)
+        self.track_ocr_futures = {}       # track_id -> Future
+        self._ocr_future_bboxes = {}      # track_id -> BoundingBox (stored at submit time)
 
         # Attribute inference parameters
         self.attr_min_confidence = 0.8  # Run attributes on high-confidence frames
@@ -1166,75 +1171,114 @@ class ALPRPilot:
                 # Don't force save yet - wait for better quality or OCR success
                 self._save_plate_crop(frame, plate_bbox, track_id, camera_id, force_save=False)
 
-        # Run OCR on detected plates (CONTINUOUS IMPROVEMENT - gate scenario)
+        # Run OCR on detected plates — async via ThreadPoolExecutor
+        # CRNNOCRService (onnxruntime) is thread-safe; YOLO never waits for OCR.
         plate_texts = {}  # Map vehicle index to plate text
         ocr_runs_this_frame = 0
 
         if self.ocr and plates:
+
+            # ── Step 1: collect completed futures from previous frames ────────
+            for track_id, fut in list(self.track_ocr_futures.items()):
+                if not fut.done():
+                    continue
+                del self.track_ocr_futures[track_id]
+
+                try:
+                    result = fut.result()
+                except Exception as e:
+                    logger.debug(f"OCR future error track {track_id}: {e}")
+                    continue
+
+                if result is None:
+                    logger.debug(f"OCR Track {track_id}: No text detected")
+                    continue
+
+                text, conf = result
+                # Build PlateDetection — we stored the bbox alongside the future
+                bbox = self._ocr_future_bboxes.pop(track_id, None)
+                if bbox is None:
+                    continue
+
+                try:
+                    from shared.schemas.event import PlateDetection
+                    plate_detection = PlateDetection(text=text, confidence=conf,
+                                                     bbox=bbox, raw_text=text)
+                except Exception:
+                    from types import SimpleNamespace
+                    plate_detection = SimpleNamespace(text=text, confidence=conf,
+                                                      bbox=bbox, raw_text=text)
+
+                self.metrics_ocr_operations.labels(camera_id=camera_id).inc()
+
+                is_new_read = track_id not in self.track_ocr_cache
+                is_better   = (track_id in self.track_ocr_cache and
+                               conf > self.track_ocr_cache[track_id].confidence)
+
+                if is_new_read or is_better:
+                    old_conf = self.track_ocr_cache[track_id].confidence if track_id in self.track_ocr_cache else 0.0
+                    self.track_ocr_cache[track_id] = plate_detection
+
+                    if is_new_read:
+                        self.plate_count += 1
+
+                    indicator = "HIGH" if conf >= self.ocr_min_confidence else ("IMPROVING" if is_better else "LOW")
+                    extra = f" +{conf - old_conf:.2f}" if is_better else ""
+                    logger.info(f"OCR Track {track_id} [{indicator}]: {text} "
+                                f"(conf: {conf:.2f}{extra}, attempt: {self.track_ocr_attempts.get(track_id, 0)})")
+
+                    if conf >= self.ocr_min_confidence and is_new_read:
+                        vehicle_idx_for_track = next(
+                            (vi for vi, tid in vehicle_tracks.items() if tid == track_id), None
+                        )
+                        vehicle = vehicles[vehicle_idx_for_track] if vehicle_idx_for_track is not None and vehicle_idx_for_track < len(vehicles) else None
+                        self._publish_plate_event(camera_id, track_id, plate_detection,
+                                                  vehicle=vehicle, vehicle_idx=vehicle_idx_for_track)
+
+                    elif conf >= self.ocr_max_confidence_target:
+                        if track_id in self.track_best_plate_crop:
+                            logger.success(f"Track {track_id}: Target confidence {conf:.2f} — saving best crop")
+                            self._save_best_crop_to_disk(track_id, camera_id)
+
+            # ── Step 2: submit new OCR jobs ────────────────────────────────────
             for vehicle_idx, plate_bboxes in plates.items():
                 track_id = vehicle_tracks.get(vehicle_idx)
 
-                if track_id is None:
-                    continue
+                if track_id is None or track_id in self.track_ocr_futures:
+                    continue  # already a pending future for this track
 
                 vehicle_bbox = vehicles[vehicle_idx].bbox if vehicle_idx < len(vehicles) else None
 
-                if self.should_run_ocr(track_id, current_bbox=vehicle_bbox):
-                    plate_bbox = plate_bboxes[0]
+                if not self.should_run_ocr(track_id, current_bbox=vehicle_bbox):
+                    continue
 
-                    if self.enable_frame_quality_filter:
-                        plate_sharpness = self.calculate_plate_sharpness(frame, plate_bbox)
-                        if plate_sharpness < self.min_frame_sharpness:
-                            logger.debug(f"Track {track_id}: Skipping blurry frame (sharpness: {plate_sharpness:.1f} < {self.min_frame_sharpness})")
-                            continue
+                plate_bbox = plate_bboxes[0]
 
-                    ocr_runs_this_frame += 1
+                if self.enable_frame_quality_filter:
+                    plate_sharpness = self.calculate_plate_sharpness(frame, plate_bbox)
+                    if plate_sharpness < self.min_frame_sharpness:
+                        logger.debug(f"Track {track_id}: Blurry frame ({plate_sharpness:.1f}), skipping")
+                        continue
 
-                    if track_id not in self.track_ocr_attempts:
-                        self.track_ocr_attempts[track_id] = 0
-                    self.track_ocr_attempts[track_id] += 1
+                # Extract crop on main thread (frame buffer advances; crop must be copied)
+                x1 = max(0, int(plate_bbox.x1))
+                y1 = max(0, int(plate_bbox.y1))
+                x2 = min(frame.shape[1], int(plate_bbox.x2))
+                y2 = min(frame.shape[0], int(plate_bbox.y2))
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                crop = frame[y1:y2, x1:x2].copy()
 
-                    ocr_start = time.time()
-                    plate_detection = self.ocr.recognize_plate(
-                        frame,
-                        plate_bbox,
-                        preprocess=True,
-                    )
-                    ocr_time = time.time() - ocr_start
+                if track_id not in self.track_ocr_attempts:
+                    self.track_ocr_attempts[track_id] = 0
+                self.track_ocr_attempts[track_id] += 1
+                ocr_runs_this_frame += 1
 
-                    self.metrics_ocr_operations.labels(camera_id=camera_id).inc()
-                    self.metrics_ocr_time.labels(camera_id=camera_id).observe(ocr_time)
+                # Store bbox so the collection step can build PlateDetection
+                self._ocr_future_bboxes[track_id] = plate_bbox
 
-                    if plate_detection:
-                        is_new_read = track_id not in self.track_ocr_cache
-                        is_better = (track_id in self.track_ocr_cache and
-                                     plate_detection.confidence > self.track_ocr_cache[track_id].confidence)
-
-                        if is_new_read or is_better:
-                            old_confidence = self.track_ocr_cache[track_id].confidence if track_id in self.track_ocr_cache else 0.0
-                            self.track_ocr_cache[track_id] = plate_detection
-
-                            if is_new_read:
-                                self.plate_count += 1
-
-                            if is_better:
-                                improvement = plate_detection.confidence - old_confidence
-                                conf_indicator = "HIGH" if plate_detection.confidence >= self.ocr_min_confidence else "IMPROVING"
-                                logger.info(f"OCR Track {track_id} [{conf_indicator}]: {plate_detection.text} (conf: {plate_detection.confidence:.2f} +{improvement:.2f}, attempt: {self.track_ocr_attempts[track_id]})")
-                            else:
-                                conf_indicator = "HIGH" if plate_detection.confidence >= self.ocr_min_confidence else "LOW"
-                                logger.info(f"OCR Track {track_id} [{conf_indicator}]: {plate_detection.text} (conf: {plate_detection.confidence:.2f}, attempt: {self.track_ocr_attempts[track_id]})")
-
-                            if plate_detection.confidence >= self.ocr_min_confidence and is_new_read:
-                                vehicle = vehicles[vehicle_idx] if vehicle_idx < len(vehicles) else None
-                                self._publish_plate_event(camera_id, track_id, plate_detection, vehicle=vehicle, vehicle_idx=vehicle_idx)
-
-                            elif plate_detection.confidence >= self.ocr_max_confidence_target:
-                                if track_id in self.track_best_plate_crop:
-                                    logger.success(f"Track {track_id}: Reached target confidence {plate_detection.confidence:.2f} - saving best crop!")
-                                    self._save_best_crop_to_disk(track_id, camera_id)
-                    else:
-                        logger.debug(f"OCR Track {track_id}: No text detected (attempt: {self.track_ocr_attempts[track_id]})")
+                fut = self.ocr_executor.submit(self.ocr.recognize_plate_crop, crop)
+                self.track_ocr_futures[track_id] = fut
 
             # Use cached OCR results for all tracks
             for vehicle_idx, plate_bboxes in plates.items():
